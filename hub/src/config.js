@@ -13,11 +13,14 @@ export function loadConfig(env = process.env) {
     return env[name];
   };
   const environment = env.HUB_ENV || 'production';
-  if (!['development', 'test', 'production'].includes(environment)) problems.push('HUB_ENV is invalid');
+  if (!['development', 'test', 'staging', 'production'].includes(environment)) problems.push('HUB_ENV is invalid');
   const isDev = DEV_ENVIRONMENTS.has(environment);
   if (isDev && (env.VERCEL_ENV === 'production' || env.NODE_ENV === 'production')) {
     problems.push('HUB_ENV cannot be a development value on a production host');
   }
+
+  // A production deployment must never be running with staging settings.
+  if (environment === 'staging' && env.VERCEL_ENV === 'production') problems.push('HUB_ENV cannot be staging on a production host');
 
   const baseUrl = required('HUB_BASE_URL');
   let origin = null;
@@ -43,7 +46,15 @@ export function loadConfig(env = process.env) {
     problems.push('Credential storage needs HUB_CREDENTIAL_KEKS and HUB_CREDENTIAL_ACTIVE_KEY');
   }
 
-  if (!isDev) required('DATABASE_URL');
+  if (env.HUB_RATE_LIMITS_ENABLED === 'false' && !isDev) problems.push('Rate limits can only be turned off in development');
+  if (flag(env.HUB_EMAIL_ENABLED) && (!env.HUB_RESEND_API_KEY || !env.HUB_EMAIL_FROM)) problems.push('Email needs HUB_RESEND_API_KEY and HUB_EMAIL_FROM');
+  if (flag(env.HUB_R2_ENABLED) && !(env.HUB_R2_ACCOUNT_ID && env.HUB_R2_BUCKET && env.HUB_R2_ACCESS_KEY_ID && env.HUB_R2_SECRET_ACCESS_KEY)) problems.push('R2 needs its account, bucket and key settings');
+
+  if (!isDev) {
+    required('DATABASE_URL');
+    // Without it every person shares one sign-in limit and can lock the others out.
+    required('HUB_TRUSTED_IP_HEADER');
+  }
   if (problems.length) throw new ConfigError(problems.join('; '));
 
   return Object.freeze({
@@ -70,6 +81,22 @@ export function loadConfig(env = process.env) {
       storageEnabled: credentialStorageEnabled,
       keks: env.HUB_CREDENTIAL_KEKS || '',
       activeKey: env.HUB_CREDENTIAL_ACTIVE_KEY || ''
+    }),
+    logLevel: env.HUB_LOG_LEVEL || 'info',
+    // Set only to a header the platform itself sets, such as x-vercel-forwarded-for.
+    trustedIpHeader: env.HUB_TRUSTED_IP_HEADER || null,
+    rateLimitsEnabled: env.HUB_RATE_LIMITS_ENABLED !== 'false',
+    email: Object.freeze({
+      enabled: flag(env.HUB_EMAIL_ENABLED),
+      apiKey: env.HUB_RESEND_API_KEY || null,
+      from: env.HUB_EMAIL_FROM || null
+    }),
+    r2: Object.freeze({
+      enabled: flag(env.HUB_R2_ENABLED),
+      accountId: env.HUB_R2_ACCOUNT_ID || null,
+      bucket: env.HUB_R2_BUCKET || null,
+      accessKeyId: env.HUB_R2_ACCESS_KEY_ID || null,
+      secretAccessKey: env.HUB_R2_SECRET_ACCESS_KEY || null
     }),
     outboundEnabled: flag(env.HUB_OUTBOUND_ENABLED),
     operationsEnabled: flag(env.HUB_OPERATIONS_ENABLED),

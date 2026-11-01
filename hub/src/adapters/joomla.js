@@ -1,8 +1,8 @@
-import { expectArray, expectObject, section, SUPPORT } from './framework.js';
+import { defineAdapter, expectArray, expectObject, SUPPORT } from './framework.js';
 
 const API = '/api/index.php/v1';
 
-export const joomla = {
+export const joomla = defineAdapter({
   key: 'joomla',
   label: 'Joomla',
   docsUrl: 'https://manual.joomla.org/docs/general-concepts/webservices/',
@@ -27,14 +27,14 @@ export const joomla = {
   authHeaders(secret) {
     return { 'X-Joomla-Token': secret.api_token, Accept: 'application/vnd.api+json' };
   },
-  async check(client) {
+  sections(client) {
     return {
-      connection: await section(async () => {
+      connection: async () => {
         const result = expectObject(await client.get(`${API}/extensions`, { query: { 'page[limit]': '1' } }));
         expectArray(result.data);
         return { api_reachable: true };
-      }),
-      extension_inventory: await section(async () => {
+      },
+      extension_inventory: async () => {
         const result = expectObject(await client.get(`${API}/extensions`, { query: { 'page[limit]': '100' } }));
         const extensions = expectArray(result.data).map(item => {
           const attributes = item.attributes ?? {};
@@ -42,7 +42,7 @@ export const joomla = {
         });
         const core = extensions.find(item => item.name === 'files_joomla');
         return { core_version: core?.version ?? null, extensions, has_more: Boolean(result.links?.next) };
-      })
+      }
     };
   }
-};
+});

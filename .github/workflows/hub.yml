@@ -20,6 +20,18 @@ jobs:
     defaults:
       run:
         working-directory: hub
+    # A throwaway server that exists only for this job. Its password is not a secret.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,3 +42,12 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
+      - name: Create a non-superuser owner
+        run: |
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner"
+      - name: PostgreSQL integration
+        run: node scripts/pg-integration.mjs
+        env:
+          HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

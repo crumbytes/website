@@ -2,13 +2,12 @@ import { html, raw } from 'hono/html';
 import { ADAPTERS, CMS_PLATFORMS, OTHER_PLATFORM, getAdapter } from '../adapters/index.js';
 import { ERROR_MESSAGES, SUPPORT_LABELS } from '../adapters/framework.js';
 import { can } from '../authz.js';
-import { csrf, dateTime, empty, fields, formErrorBanner, monitoringTag, recoverabilityTag, roleLabel, shell, statusTag, tag } from './layout.js';
+import { dateTime, empty, fields, formErrorBanner, monitoringTag, postForm, recoverabilityTag, roleLabel, shell, stateBanner, statusTag, submit, tag } from './layout.js';
+import { domainsSection, findingForm, findingList, inventoryFilters, lifecycleSection, monitoringExtras, planItemsPanel, profileCard, recoverySection, riskTag, stackltrPanel, TASK_KINDS, workLogList } from './pages2.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const nowLocal = () => new Date().toISOString().slice(0, 16);
 const platformLabel = key => CMS_PLATFORMS.find(item => item.key === key)?.label ?? key;
-const postForm = (action, view, content, klass = 'stack') => html`<form class="${klass}" method="post" action="${action}">${csrf(view.csrfToken)}${content}</form>`;
-const submit = (label, klass = 'btn') => html`<div><button class="${klass}" type="submit">${label}</button></div>`;
 const NOTICES = {
   saved: { kind: 'ok', title: 'Saved.' },
   credential_stored: { kind: 'ok', title: 'Credential encrypted and stored.', text: ' It cannot be displayed again.' },
@@ -16,8 +15,6 @@ const NOTICES = {
   check_done: { kind: 'ok', title: 'Connection check finished.', text: ' See the latest result below.' }
 };
 export const noticeFor = code => (Object.hasOwn(NOTICES, code) ? NOTICES[code] : null);
-const stateBanner = state => (state?.errors
-  ? html`<div class="banner error" role="alert"><strong>${state.message ?? 'That could not be saved.'}</strong>${Object.values(state.errors).join(' ')}</div>` : '');
 
 // Overview -------------------------------------------------------------------
 
@@ -37,10 +34,12 @@ export function overviewPage(view, data) {
       ${card('Security reviews', data.security_reviews || 'None recorded', data.security_reviews ? 'Reviews on record' : 'No review has been recorded. This is not a clean result.', !data.security_reviews)}
       ${card('Backup sources', data.backup_sources || 'None recorded', data.backup_sources ? 'See Backups for restore evidence' : 'Backup coverage is unknown.', !data.backup_sources)}
       ${card('Platform connections', data.connected_platforms, 'Passed their latest connection check')}
+      ${card('Open incidents', data.open_incidents, 'Open now, from checks that ran')}
+      ${card('Open findings', data.open_findings, 'Automated and manual')}
     </div>
     <div class="split">
       <section class="panel" aria-labelledby="reminders"><div class="panel-head"><div><h2 id="reminders">Due within 7 days</h2><p class="muted">Overdue and upcoming work from your records.</p></div></div>
-        ${data.reminders.length ? html`<div class="table-wrap"><table><thead><tr><th>Due</th><th>Item</th><th>Website</th></tr></thead><tbody>
+        ${data.reminders.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Due</th><th>Item</th><th>Website</th></tr></thead><tbody>
           ${data.reminders.map(item => html`<tr><td>${item.due_on}${item.due_on < today() ? html` ${tag('Overdue', 'bad')}` : ''}</td><td>${item.title}</td><td><a href="/websites/${item.website_id}">${item.website_name}</a></td></tr>`)}
         </tbody></table></div>` : empty('Nothing due', 'No tasks, schedules or reviews fall due in the next 7 days.')}
       </section>
@@ -54,23 +53,22 @@ export function overviewPage(view, data) {
 
 // Websites -------------------------------------------------------------------
 
-export function websitesPage(view, { websites, search, notice }) {
+export function websitesPage(view, { websites, filters, clients, hosting, notice }) {
+  const search = filters.search || filters.client || filters.platform || filters.hosting || filters.monitoring || filters.lifecycle;
   return shell({
     title: 'Client websites', active: '/websites', view, notice,
     actions: can(view.staff, 'website.write') ? html`<a class="btn" href="/websites/new">Add website</a>` : '',
-    body: html`<section class="panel"><div class="panel-head" role="search"><form class="searchbar" method="get" action="/websites">
-        <input type="search" name="q" value="${search ?? ''}" aria-label="Search websites and clients" placeholder="Search websites and clients">
-        <button class="btn quiet" type="submit">Search</button></form></div>
-      ${websites.length ? html`<div class="table-wrap"><table><thead><tr><th>Website</th><th>Client</th><th>Platform</th><th>Hosting</th><th>Plan</th><th>Open tasks</th><th>Uptime</th></tr></thead><tbody>
+    body: html`<section class="panel"><div class="panel-head">${inventoryFilters({ filters, clients, hosting })}</div>
+      ${websites.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Website</th><th>Client</th><th>Platform</th><th>Hosting</th><th>Plan</th><th>Open tasks</th><th>Next due</th><th>Uptime</th><th>Backup</th><th>Security</th></tr></thead><tbody>
         ${websites.map(site => html`<tr><td><a href="/websites/${site.id}">${site.display_name}</a><br><span class="note">${site.primary_url}</span>${site.lifecycle !== 'active' ? html` ${statusTag(site.lifecycle)}` : ''}</td>
           <td>${site.client_name}</td><td>${site.cms_other_name ?? platformLabel(site.cms_platform)}</td><td>${site.hosting_provider ?? html`<span class="muted">Not recorded</span>`}</td><td>${site.plan_name ?? html`<span class="muted">None</span>`}</td>
-          <td>${site.open_tasks}</td><td>${monitoringTag(site.uptime_outcome)}${site.uptime_checked_at ? html`<br><span class="note">${dateTime(site.uptime_checked_at)}</span>` : ''}</td></tr>`)}
-      </tbody></table></div>` : empty(search ? 'No matches' : 'No client websites yet', search ? 'Try a different search.' : 'Add a website to start tracking it. Only clients you can access appear here.')}
+          <td>${site.open_tasks}</td><td>${site.next_maintenance_on ?? html`<span class="muted">None</span>`}</td><td>${monitoringTag(site.uptime_outcome)}${site.uptime_checked_at ? html`<br><span class="note">${dateTime(site.uptime_checked_at)}</span>` : ''}</td><td>${recoverabilityTag(site.recoverability)}</td><td>${riskTag(site.risk)}</td></tr>`)}
+      </tbody></table></div>` : empty(search ? 'No matches' : 'No client websites yet', search ? 'Try different filters.' : 'Add a website to start tracking it. Only clients you can access appear here.')}
     </section>`
   });
 }
 
-export function websiteFormPage(view, { clients, plans, website, state }) {
+export function websiteFormPage(view, { clients, plans, hosting, owners, website, state }) {
   const editing = Boolean(website);
   const values = state?.values ?? website ?? {};
   const list = [
@@ -79,7 +77,8 @@ export function websiteFormPage(view, { clients, plans, website, state }) {
     { name: 'primary_url', label: 'Website address', type: 'url', required: true, help: 'Include https://' },
     { name: 'cms_platform', label: 'CMS platform', type: 'select', required: true, placeholder: 'Choose a platform', options: CMS_PLATFORMS.map(item => ({ value: item.key, label: item.label })) },
     { name: 'cms_other_name', label: 'Platform name if Other', help: 'Only used when the platform is Other CMS.' },
-    { name: 'hosting_provider', label: 'Hosting provider' },
+    { name: 'hosting_provider_id', label: 'Hosting provider', type: 'select', placeholder: 'Not recorded', options: hosting.map(item => ({ value: item.id, label: item.name })), help: 'Add providers on the Hosting providers page.' },
+    { name: 'account_owner_id', label: 'Account owner', type: 'select', placeholder: 'Not assigned', options: owners.map(item => ({ value: item.id, label: item.display_name })), help: 'The CrumByte person responsible for this website.' },
     { name: 'service_plan_id', label: 'Service plan', type: 'select', placeholder: 'No plan', options: plans.map(item => ({ value: item.id, label: item.name })) },
     { name: 'lifecycle', label: 'Status', type: 'select', required: true, options: ['active', 'paused', 'offboarded'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) },
     { name: 'notes', label: 'Internal notes', type: 'textarea', help: 'Do not put passwords, keys or other credentials here.' }
@@ -119,7 +118,8 @@ function connectionSection(view, website, connections, operations, credentials, 
     </div>
     ${connection && can(view.staff, 'connection.check') ? html`<details><summary>Run a connection check</summary>
       ${config.outboundEnabled ? '' : html`<p class="muted">Outbound connections are turned off in this environment, so the check will report that and contact nothing.</p>`}
-      ${postForm(`/connections/${connection.id}/check`, view, submit('Run check now', 'btn quiet'))}</details>` : ''}
+      ${postForm(`/connections/${connection.id}/test`, view, submit('Test connection only', 'btn quiet'))}
+      ${postForm(`/connections/${connection.id}/check`, view, submit('Run full check', 'btn quiet'))}</details>` : ''}
     ${!connection && canManage ? html`<details><summary>Connect ${adapter.label}</summary>
       ${postForm(`/websites/${website.id}/connections`, view, html`<input type="hidden" name="adapter_key" value="${adapter.key}">
         ${fields([
@@ -176,7 +176,7 @@ function operationsSection(view, connection, adapter, operations, config) {
 }
 
 export function websiteDetailPage(view, data) {
-  const { website, tasks, schedules, checks, reviews, sources, runs, history, connections, operations, credentials, assignable, config, state, notice } = data;
+  const { website, tasks, schedules, checks, reviews, sources, runs, history, connections, operations, credentials, assignable, config, state, notice, domains, plans, incidents, windows, uptime, findings, recovery, workLogs } = data;
   const writeMaintenance = can(view.staff, 'maintenance.write');
   const assigneeOptions = assignable.map(item => ({ value: item.id, label: item.display_name }));
   const existingKinds = new Set(checks.map(item => item.kind));
@@ -184,20 +184,13 @@ export function websiteDetailPage(view, data) {
     title: website.display_name, active: '/websites', view, notice,
     actions: can(view.staff, 'website.write') ? html`<a class="btn quiet" href="/websites/${website.id}/edit">Edit</a>` : '',
     body: html`${stateBanner(state)}
-    <nav class="subnav" aria-label="On this page">${[['maintenance', 'Maintenance'], ['monitoring', 'Monitoring'], ['connection', 'Connection'], ['security', 'Security'], ['backups', 'Backups'], ['history', 'History']].map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>
-    <section class="panel"><div class="panel-body"><dl class="facts">
-      <dt>Client</dt><dd><a href="/clients/${website.client_account_id}">${website.client_name}</a></dd>
-      <dt>Address</dt><dd><a href="${website.primary_url}" rel="noreferrer noopener">${website.primary_url}</a></dd>
-      <dt>Platform</dt><dd>${website.cms_other_name ?? platformLabel(website.cms_platform)}</dd>
-      <dt>Hosting</dt><dd>${website.hosting_provider ?? 'Not recorded'}</dd>
-      <dt>Service plan</dt><dd>${website.plan_name ?? 'None'}</dd>
-      <dt>Status</dt><dd>${statusTag(website.lifecycle)}</dd>
-      <dt>StackLTR</dt><dd>${website.stackltr_company_id ? `Linked to company ${website.stackltr_company_id}` : 'Client not linked yet'}</dd>
-      ${website.notes ? html`<dt>Notes</dt><dd>${website.notes}</dd>` : ''}
-    </dl></div></section>
+    <nav class="subnav" aria-label="On this page">${[['domains', 'Domains'], ['maintenance', 'Maintenance'], ['monitoring', 'Monitoring'], ['connection', 'Connection'], ['security', 'Security'], ['backups', 'Backups'], ['history', 'History'], ['administration', 'Administration']].map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>
+    ${profileCard(website)}
+    ${domainsSection(view, website, domains)}
 
     <section class="panel" id="maintenance"><div class="panel-head"><div><h2>Maintenance</h2><p class="muted">Open work and recurring schedules for this website.</p></div></div>
       ${tasks.length ? taskTable(view, tasks, assigneeOptions, false) : empty('No open tasks', 'Nothing is assigned on this website right now.')}
+      ${workLogList(workLogs)}
       ${schedules.length ? html`<div class="panel-body"><h3>Schedules</h3><ul class="plain">${schedules.map(item => scheduleRow(view, item))}</ul></div>` : ''}
       ${writeMaintenance ? html`<details><summary>Add a task</summary>${postForm('/maintenance/tasks', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">${taskFields(assigneeOptions)}${submit('Add task')}`)}</details>
       <details><summary>Add a schedule</summary>${postForm('/maintenance/schedules', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">${scheduleFields(assigneeOptions)}${submit('Add schedule')}`)}</details>` : ''}
@@ -205,17 +198,23 @@ export function websiteDetailPage(view, data) {
 
     <section class="panel" id="monitoring"><div class="panel-head"><div><h2>Monitoring</h2><p class="muted">Results come only from checks the hub actually ran.</p></div></div>
       ${checks.length ? checkTable(checks, false) : empty('Monitoring is not set up', 'No check has been enabled, so this site\'s status is unknown.')}
+      ${monitoringExtras(view, website, { incidents, windows, uptime })}
       ${can(view.staff, 'monitoring.write') && existingKinds.size < 2 ? html`<details><summary>Enable a check</summary>${postForm('/monitoring/checks', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">
         ${fields([
           { name: 'kind', label: 'Check', type: 'select', required: true, options: [{ value: 'uptime', label: 'Uptime' }, { value: 'ssl', label: 'SSL certificate expiry' }].filter(item => !existingKinds.has(item.value)) },
-          { name: 'interval_minutes', label: 'Run every (minutes)', type: 'number', required: true, value: 60 }
+          { name: 'interval_minutes', label: 'Run every (minutes)', type: 'number', required: true, value: 60 },
+          { name: 'failure_threshold', label: 'Open an incident after this many failures in a row', type: 'number', required: true, value: 2 },
+          { name: 'response_warn_ms', label: 'Warn when slower than (ms)', type: 'number' },
+          { name: 'cert_warn_days', label: 'Warn this many days before a certificate expires', type: 'number', required: true, value: 30 }
         ])}${config.outboundEnabled ? '' : html`<p class="muted">Outbound connections are turned off in this environment, so checks stay unknown until they are enabled.</p>`}${submit('Enable check')}`)}</details>` : ''}
     </section>
 
     ${connectionSection(view, website, connections, operations, credentials, config)}
 
-    <section class="panel" id="security"><div class="panel-head"><div><h2>Security reviews</h2><p class="muted">Records of reviews people carried out. No scanner is connected.</p></div></div>
+    <section class="panel" id="security"><div class="panel-head"><div><h2>Security</h2><p class="muted">Automated checks and manual assessments are labelled. No vulnerability scanner is connected.</p></div></div>
+      ${findings.length ? findingList(view, findings, false) : ''}
       ${reviews.length ? reviewTable(reviews, false) : empty('No security review recorded', 'No review on record does not mean the site is secure.')}
+      ${findingForm(view, website)}
       ${can(view.staff, 'security.write') ? html`<details><summary>Record a review</summary>${postForm('/security/reviews', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">${reviewFields()}${submit('Record review')}`)}</details>` : ''}
     </section>
 
@@ -224,7 +223,7 @@ export function websiteDetailPage(view, data) {
       ${runs.length ? html`<div class="panel-body"><h3>Recent backup runs</h3><ul class="plain">${runs.map(run => html`<li>${statusTag(run.status)} ${run.source_label}, ${dateTime(run.finished_at)} <span class="note">reported by ${run.reported_by}${run.artifact_ref ? `, ${run.artifact_ref}` : ''}</span></li>`)}</ul></div>` : ''}
       ${can(view.staff, 'backup.write') ? html`
       <details><summary>Add a backup source</summary>${postForm('/backups/sources', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">
-        ${fields([{ name: 'provider', label: 'Provider', required: true }, { name: 'label', label: 'Description', required: true }, { name: 'expected_interval_hours', label: 'Expected every (hours)', type: 'number' }])}${submit('Add source')}`)}</details>
+        ${fields([{ name: 'provider', label: 'Provider', required: true }, { name: 'label', label: 'Description', required: true }, { name: 'schedule_description', label: 'Schedule', help: 'For example nightly at 02:00 UTC. The provider runs it, not the hub.' }, { name: 'expected_interval_hours', label: 'Expected every (hours)', type: 'number', help: 'An alert is raised when a backup is overdue.' }, { name: 'retention_days', label: 'Retention (days)', type: 'number' }, { name: 'storage_provider', label: 'Status comes from', type: 'select', required: true, options: [{ value: 'manual', label: 'Entered by staff' }, { value: 'r2', label: 'Cloudflare R2 listing' }] }, { name: 'storage_ref', label: 'Storage path', help: 'For R2, the object prefix. No keys or passwords.' }, { name: 'encryption_method', label: 'Encryption in use', help: 'What the provider or your process does. The hub cannot verify this.' }])}${submit('Add source')}`)}</details>
       ${sources.length ? html`<details><summary>Record a backup run</summary>${postForm('/backups/runs', view, html`<input type="hidden" name="_return" value="/websites/${website.id}">
         ${fields([{ name: 'source_id', label: 'Source', type: 'select', required: true, options: sources.map(item => ({ value: item.id, label: item.label })) },
           { name: 'status', label: 'Result', type: 'select', required: true, options: [{ value: 'succeeded', label: 'Succeeded' }, { value: 'failed', label: 'Failed' }, { value: 'unknown', label: 'Unknown' }] },
@@ -236,6 +235,7 @@ export function websiteDetailPage(view, data) {
           { name: 'checks_performed', label: 'Checks performed', type: 'textarea', required: true },
           { name: 'evidence_ref', label: 'Evidence reference', help: 'Required for a passed test: a ticket, document or file reference.' },
           { name: 'performed_at', label: 'Performed (UTC)', type: 'datetime-local', required: true, value: nowLocal() }])}${submit('Record restore test')}`)}</details>` : ''}` : ''}
+      ${recoverySection(view, website, recovery, runs)}
     </section>
 
     <section class="panel" id="history"><div class="panel-head"><div><h2>Service history</h2><p class="muted">Permanent record of work on this website. Entries cannot be edited.</p></div></div>
@@ -243,7 +243,8 @@ export function websiteDetailPage(view, data) {
       ${writeMaintenance ? html`<details><summary>Record completed work</summary>${postForm('/history', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">
         ${fields([{ name: 'kind', label: 'Type', type: 'select', required: true, options: ['maintenance', 'security', 'backup', 'restore', 'connection', 'other'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) },
           { name: 'summary', label: 'What was done', type: 'textarea', required: true }, { name: 'performed_at', label: 'Performed (UTC)', type: 'datetime-local', required: true, value: nowLocal() }])}${submit('Add to history')}`)}</details>` : ''}
-    </section>`
+    </section>
+    ${lifecycleSection(view, website, plans)}`
   });
 }
 
@@ -251,6 +252,7 @@ export function websiteDetailPage(view, data) {
 
 const taskFields = assignees => fields([
   { name: 'title', label: 'Task', required: true },
+  { name: 'kind', label: 'Type', type: 'select', required: true, value: 'other', options: TASK_KINDS, help: 'Software and plugin updates need a second person to approve them first.' },
   { name: 'details', label: 'Details', type: 'textarea' },
   { name: 'priority', label: 'Priority', type: 'select', required: true, value: 'normal', options: ['low', 'normal', 'high', 'urgent'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) },
   { name: 'assignee_id', label: 'Assign to', type: 'select', placeholder: 'Unassigned', options: assignees },
@@ -260,6 +262,7 @@ const taskFields = assignees => fields([
 
 const scheduleFields = assignees => fields([
   { name: 'title', label: 'Recurring work', required: true },
+  { name: 'kind', label: 'Type', type: 'select', required: true, value: 'inspection', options: TASK_KINDS },
   { name: 'interval_days', label: 'Repeat every (days)', type: 'number', required: true, value: 30 },
   { name: 'next_due_on', label: 'Next due', type: 'date', required: true },
   { name: 'default_assignee_id', label: 'Default assignee', type: 'select', placeholder: 'Unassigned', options: assignees }
@@ -276,8 +279,8 @@ const reviewFields = () => fields([
 
 function taskTable(view, tasks, assignees, showWebsite) {
   const write = can(view.staff, 'maintenance.write');
-  return html`<div class="table-wrap"><table><thead><tr><th>Task</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Priority</th><th>Status</th><th>Assigned to</th><th>Due</th>${write ? html`<th>Update</th>` : ''}</tr></thead><tbody>
-    ${tasks.map(task => html`<tr><td><strong>${task.title}</strong>${task.details ? html`<br><span class="note">${task.details}</span>` : ''}${task.stackltr_request_id ? html`<br><span class="note">StackLTR request ${task.stackltr_request_id}</span>` : ''}${task.completion_notes ? html`<br><span class="note">Completed: ${task.completion_notes}</span>` : ''}</td>
+  return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Task</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Priority</th><th>Status</th><th>Assigned to</th><th>Due</th>${write ? html`<th>Update</th>` : ''}</tr></thead><tbody>
+    ${tasks.map(task => html`<tr><td><strong>${task.title}</strong> <span class="note">${task.kind.replaceAll('_', ' ')}</span>${task.requires_approval ? html` ${task.approved_at ? tag('Approved', 'good') : tag('Needs approval', 'warn')}` : ''}${task.details ? html`<br><span class="note">${task.details}</span>` : ''}${task.stackltr_request_id ? html`<br><span class="note">StackLTR request ${task.stackltr_request_id}</span>` : ''}${task.completion_notes ? html`<br><span class="note">Completed: ${task.completion_notes}</span>` : ''}</td>
       ${showWebsite ? html`<td><a href="/websites/${task.website_id}">${task.website_name}</a><br><span class="note">${task.client_name}</span></td>` : ''}
       <td>${statusTag(task.priority)}</td><td>${statusTag(task.status)}</td><td>${task.assignee_name ?? html`<span class="muted">Unassigned</span>`}</td>
       <td>${task.due_on ?? html`<span class="muted">None</span>`}${task.due_on && task.due_on < today() && !['completed', 'cancelled'].includes(task.status) ? html` ${tag('Overdue', 'bad')}` : ''}</td>
@@ -286,8 +289,11 @@ function taskTable(view, tasks, assignees, showWebsite) {
           <select name="status" aria-label="Status for ${task.title}">${['open', 'in_progress', 'blocked', 'cancelled'].map(value => html`<option value="${value}" ${value === task.status ? raw('selected') : ''}>${value.replaceAll('_', ' ')}</option>`)}</select>
           <select name="assignee_id" aria-label="Assignee for ${task.title}"><option value="">Unassigned</option>${assignees.map(item => html`<option value="${item.value}" ${item.value === task.assignee_id ? raw('selected') : ''}>${item.label}</option>`)}</select>
           <button class="btn quiet" type="submit">Update</button>`, 'inline')}
-        <details><summary>Complete</summary>${postForm(`/maintenance/tasks/${task.id}/complete`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
-          ${fields([{ name: 'completion_notes', label: 'What was done', type: 'textarea', required: true }])}${submit('Mark completed')}`)}</details>`}</td>` : ''}
+        ${task.requires_approval && !task.approved_at && can(view.staff, 'operation.decide') && task.created_by !== view.staff.id ? postForm(`/maintenance/tasks/${task.id}/approve`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}"><button class="btn quiet" type="submit">Approve change</button>`, 'inline') : ''}
+        <details><summary>Log work</summary>${postForm(`/maintenance/tasks/${task.id}/worklog`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
+          ${fields([{ name: 'note', label: 'What you did', type: 'textarea', required: true }, { name: 'minutes', label: 'Minutes', type: 'number' }])}${submit('Add to work log', 'btn quiet')}`)}</details>
+        ${task.requires_approval && !task.approved_at ? '' : html`<details><summary>Complete</summary>${postForm(`/maintenance/tasks/${task.id}/complete`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
+          ${fields([{ name: 'completion_notes', label: 'What was done', type: 'textarea', required: true }, { name: 'completion_evidence_ref', label: 'Evidence reference' }])}${submit('Mark completed')}`)}</details>`}`}</td>` : ''}
     </tr>`)}
   </tbody></table></div>`;
 }
@@ -296,8 +302,8 @@ const scheduleRow = (view, item) => html`<li><strong>${item.title}</strong> ever
   <span class="note">${item.assignee_name ? `Default: ${item.assignee_name}` : 'No default assignee'}</span>
   ${can(view.staff, 'maintenance.write') ? postForm(`/maintenance/schedules/${item.id}/task`, view, html`<button class="btn quiet" type="submit">Create task</button>`, 'inline') : ''}</li>`;
 
-function checkTable(checks, showWebsite) {
-  return html`<div class="table-wrap"><table><thead><tr><th>Check</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest result</th><th>Details</th><th>Checked</th></tr></thead><tbody>
+export function checkTable(checks, showWebsite) {
+  return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Check</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest result</th><th>Details</th><th>Checked</th></tr></thead><tbody>
     ${checks.map(check => html`<tr><td>${check.kind === 'ssl' ? 'SSL certificate' : 'Uptime'}<br><span class="note">every ${check.interval_minutes} min</span></td>
       ${showWebsite ? html`<td><a href="/websites/${check.website_id}">${check.website_name}</a><br><span class="note">${check.client_name}</span></td>` : ''}
       <td>${monitoringTag(check.outcome)}</td>
@@ -307,14 +313,14 @@ function checkTable(checks, showWebsite) {
 }
 
 function reviewTable(reviews, showWebsite) {
-  return html`<div class="table-wrap"><table><thead><tr><th>Reviewed</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Scope</th><th>Outcome</th><th>Summary</th><th>Reviewer</th><th>Next due</th></tr></thead><tbody>
+  return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Reviewed</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Scope</th><th>Outcome</th><th>Summary</th><th>Reviewer</th><th>Next due</th></tr></thead><tbody>
     ${reviews.map(review => html`<tr><td>${dateTime(review.reviewed_at)}</td>${showWebsite ? html`<td><a href="/websites/${review.website_id}">${review.website_name}</a></td>` : ''}<td>${review.scope}</td><td>${statusTag(review.outcome)}</td><td>${review.summary}${review.evidence_ref ? html`<br><span class="note">Evidence: ${review.evidence_ref}</span>` : ''}</td><td>${review.reviewer_name}</td><td>${review.next_due_on ?? ''}</td></tr>`)}
   </tbody></table></div>`;
 }
 
 function sourceTable(sources, showWebsite) {
-  return html`<div class="table-wrap"><table><thead><tr><th>Source</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest backup</th><th>Can it be restored?</th></tr></thead><tbody>
-    ${sources.map(source => html`<tr><td>${source.label}<br><span class="note">${source.provider}</span></td>${showWebsite ? html`<td><a href="/websites/${source.website_id}">${source.website_name}</a><br><span class="note">${source.client_name}</span></td>` : ''}
+  return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Source</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest backup</th><th>Can it be restored?</th></tr></thead><tbody>
+    ${sources.map(source => html`<tr><td>${source.label}<br><span class="note">${source.provider}${source.schedule_description ? `, ${source.schedule_description}` : ''}${source.retention_days ? `, kept ${source.retention_days} days` : ''}${source.encryption_method ? `. Encryption as recorded: ${source.encryption_method}` : ''}</span></td>${showWebsite ? html`<td><a href="/websites/${source.website_id}">${source.website_name}</a><br><span class="note">${source.client_name}</span></td>` : ''}
       <td>${source.latest_run_status ? html`${statusTag(source.latest_run_status)}<br><span class="note">${dateTime(source.latest_run_finished_at)}</span>` : html`<span class="muted">None recorded</span>`}</td>
       <td>${recoverabilityTag(source.recoverability)}${source.latest_passed_at ? html`<br><span class="note">Last passed ${dateTime(source.latest_passed_at)}</span>` : ''}</td></tr>`)}
   </tbody></table></div>`;
@@ -322,23 +328,23 @@ function sourceTable(sources, showWebsite) {
 
 // Clients --------------------------------------------------------------------
 
-export function clientsPage(view, { clients, plans, notice, state }) {
+export function clientsPage(view, { clients, plans, planTasks, notice, state }) {
   const write = can(view.staff, 'client.write');
   return shell({
     title: 'Clients', active: '/clients', view, notice,
     actions: write ? html`<a class="btn" href="/clients/new">Add client</a>` : '',
     body: html`${stateBanner(state)}<div class="banner"><strong>Customer details stay in StackLTR.</strong>The hub only keeps the name and a link. Contacts, tickets and invoices are not stored or copied here.</div>
-    <section class="panel">${clients.length ? html`<div class="table-wrap"><table><thead><tr><th>Client</th><th>Websites</th><th>Status</th><th>StackLTR</th></tr></thead><tbody>
+    <section class="panel">${clients.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Client</th><th>Websites</th><th>Status</th><th>StackLTR</th></tr></thead><tbody>
       ${clients.map(client => html`<tr><td><a href="/clients/${client.id}">${client.display_name}</a></td><td>${client.website_count}</td><td>${statusTag(client.status)}</td><td>${client.stackltr_company_id ? tag('Linked', 'good') : tag('Not linked', 'unknown')}</td></tr>`)}
     </tbody></table></div>` : empty('No clients yet', write ? 'Add a client to begin. No sample records are created.' : 'You are not assigned to any clients yet. Ask an admin for access.')}</section>
-    <section class="panel"><div class="panel-head"><div><h2>Service plans</h2><p class="muted">Plan names and StackLTR billing references. Pricing and invoices stay in StackLTR.</p></div></div>
-      ${plans.length ? html`<div class="panel-body"><ul class="plain">${plans.map(plan => html`<li><strong>${plan.name}</strong>${plan.maintenance_interval_days ? ` every ${plan.maintenance_interval_days} days` : ''} <span class="note">${plan.description}${plan.stackltr_billing_ref ? ` Billing reference: ${plan.stackltr_billing_ref}` : ''}</span></li>`)}</ul></div>` : empty('No service plans yet', 'Plans are optional.')}
-      ${can(view.staff, 'plan.write') ? html`<details><summary>Add a service plan</summary>${postForm('/plans', view, html`${fields([{ name: 'name', label: 'Plan name', required: true }, { name: 'description', label: 'Description', type: 'textarea' }, { name: 'maintenance_interval_days', label: 'Maintenance every (days)', type: 'number' }, { name: 'stackltr_billing_ref', label: 'StackLTR billing reference' }])}${submit('Add plan')}`)}</details>` : ''}
+    <section class="panel"><div class="panel-head"><div><h2>Maintenance plans</h2><p class="muted">Recurring work for a website, with a StackLTR billing reference. Pricing and invoices stay in StackLTR.</p></div></div>
+      ${plans.length ? planItemsPanel(view, plans, planTasks) : empty('No maintenance plans yet', 'Plans are optional. No sample plans are created.')}
+      ${can(view.staff, 'plan.write') ? html`<details><summary>Add a maintenance plan</summary>${postForm('/plans', view, html`${fields([{ name: 'name', label: 'Plan name', required: true }, { name: 'description', label: 'Description', type: 'textarea' }, { name: 'maintenance_interval_days', label: 'Maintenance every (days)', type: 'number' }, { name: 'stackltr_billing_ref', label: 'StackLTR billing reference' }])}${submit('Add plan')}`)}</details>` : ''}
     </section>`
   });
 }
 
-export function clientFormPage(view, { client, websites, state, notice }) {
+export function clientFormPage(view, { client, websites, state, notice, stackltr }) {
   const values = state?.values ?? client ?? {};
   const write = can(view.staff, 'client.write');
   const list = [
@@ -350,7 +356,7 @@ export function clientFormPage(view, { client, websites, state, notice }) {
   ];
   return shell({
     title: client ? client.display_name : 'Add client', active: '/clients', view, notice,
-    body: html`${client ? html`<section class="panel"><div class="panel-head"><h2>Websites</h2></div>${websites.length ? html`<div class="panel-body"><ul class="plain">${websites.map(site => html`<li><a href="/websites/${site.id}">${site.display_name}</a> <span class="note">${site.primary_url}</span></li>`)}</ul></div>` : empty('No websites', 'This client has no managed websites.')}</section>` : ''}
+    body: html`${client && stackltr ? stackltrPanel(view, { ...stackltr, client }) : ''}${client ? html`<section class="panel"><div class="panel-head"><h2>Websites</h2></div>${websites.length ? html`<div class="panel-body"><ul class="plain">${websites.map(site => html`<li><a href="/websites/${site.id}">${site.display_name}</a> <span class="note">${site.primary_url}</span></li>`)}</ul></div>` : empty('No websites', 'This client has no managed websites.')}</section>` : ''}
     ${write ? html`<section class="panel"><div class="panel-body">${formErrorBanner(state)}${postForm(client ? `/clients/${client.id}` : '/clients', view, html`${fields(list, { values: { status: 'active', ...values }, errors: state?.errors })}${submit(client ? 'Save client' : 'Add client')}`)}</div></section>`
       : html`<section class="panel"><div class="panel-body"><dl class="facts"><dt>Status</dt><dd>${statusTag(client.status)}</dd><dt>StackLTR</dt><dd>${client.stackltr_company_id ?? 'Not linked'}</dd></dl></div></section>`}`
   });
@@ -362,6 +368,7 @@ export function maintenancePage(view, { tasks, schedules, websites, assignable, 
   const assignees = assignable.map(item => ({ value: item.id, label: item.display_name }));
   return shell({
     title: 'Maintenance', active: '/maintenance', view, notice,
+    actions: html`<a class="btn quiet" href="/reports/maintenance">Maintenance report</a>`,
     body: html`${stateBanner(state)}
     <nav class="subnav" aria-label="Task filter"><a href="/maintenance" ${scope === 'open' ? raw('aria-current="true"') : ''}>Open tasks</a><a href="/maintenance?scope=all" ${scope === 'all' ? raw('aria-current="true"') : ''}>All tasks</a></nav>
     <section class="panel">${tasks.length ? taskTable(view, tasks, assignees, true) : empty('No tasks', 'Nothing matches this view.')}
@@ -371,22 +378,6 @@ export function maintenancePage(view, { tasks, schedules, websites, assignable, 
     <section class="panel"><div class="panel-head"><div><h2>Schedules</h2><p class="muted">Recurring work. Staff create the task when it comes due.</p></div></div>
       ${schedules.length ? html`<div class="panel-body"><ul class="plain">${schedules.map(item => html`${scheduleRow(view, item)}`)}</ul></div>` : empty('No schedules', 'Add one from a website page.')}
     </section>`
-  });
-}
-
-export function monitoringPage(view, { checks, config }) {
-  return shell({
-    title: 'Monitoring', active: '/monitoring', view,
-    notice: config.outboundEnabled ? null : { kind: 'warn', title: 'Probes are turned off in this environment.', text: ' No site is contacted, and checks stay unknown.' },
-    body: html`<section class="panel">${checks.length ? checkTable(checks, true) : empty('No checks enabled', 'Enable uptime and certificate checks from a website page.')}</section>`
-  });
-}
-
-export function securityPage(view, { reviews }) {
-  return shell({
-    title: 'Security', active: '/security', view,
-    notice: { title: 'No scanner is connected.', text: ' These are reviews people recorded. An empty list is not a clean result.' },
-    body: html`<section class="panel">${reviews.length ? reviewTable(reviews, true) : empty('No security reviews recorded', 'Record a review from a website page.')}</section>`
   });
 }
 
@@ -418,7 +409,7 @@ export function staffPage(view, { staff, clients, state, notice }) {
   return shell({
     title: 'Staff', active: '/staff', view, notice,
     body: html`${stateBanner(state)}
-    <section class="panel"><div class="table-wrap"><table><thead><tr><th>Person</th><th>Role and status</th><th>Clients</th><th>Last sign-in</th></tr></thead><tbody>
+    <section class="panel"><div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Person</th><th>Role and status</th><th>Clients</th><th>Last sign-in</th></tr></thead><tbody>
       ${staff.map(member => html`<tr><td><strong>${member.display_name}</strong><br><span class="note">${member.email}</span></td>
         <td>${member.id === view.staff.id || (member.role === 'owner' && view.staff.role !== 'owner') ? html`${roleLabel(member.role)} ${statusTag(member.status)}` : postForm(`/staff/${member.id}`, view, html`
           <select name="role" aria-label="Role for ${member.display_name}">${roleOptions.map(option => html`<option value="${option.value}" ${option.value === member.role ? raw('selected') : ''}>${option.label}</option>`)}</select>
@@ -440,7 +431,7 @@ export function auditPage(view, { entries, chainBrokenAt }) {
     notice: chainBrokenAt
       ? { kind: 'error', title: 'The audit chain failed verification.', text: ` The first entry that does not verify is ${chainBrokenAt}. Treat this as a security incident.` }
       : { kind: 'ok', title: 'Hash chain verified.', text: ' No entry has been altered since it was written.' },
-    body: html`<section class="panel">${entries.length ? html`<div class="table-wrap"><table><thead><tr><th>#</th><th>When</th><th>Who</th><th>Action</th><th>Result</th><th>Client</th><th>Details</th></tr></thead><tbody>
+    body: html`<section class="panel">${entries.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>#</th><th>When</th><th>Who</th><th>Action</th><th>Result</th><th>Client</th><th>Details</th></tr></thead><tbody>
       ${entries.map(entry => html`<tr><td>${entry.seq}</td><td>${dateTime(entry.occurred_at)}</td><td>${entry.actor_name ?? entry.actor_type}</td><td><code>${entry.action}</code></td><td>${tag(entry.outcome, entry.outcome === 'success' ? 'good' : 'bad')}</td><td>${entry.client_name ?? ''}</td><td class="note">${JSON.stringify(entry.metadata)}</td></tr>`)}
     </tbody></table></div>` : empty('No entries', 'Nothing has been recorded yet.')}</section>`
   });

@@ -1,8 +1,8 @@
-import { expectArray, expectObject, section, SUPPORT } from './framework.js';
+import { defineAdapter, expectArray, expectObject, SUPPORT } from './framework.js';
 
 const BASE_URL = 'https://api.squarespace.com';
 
-export const squarespace = {
+export const squarespace = defineAdapter({
   key: 'squarespace',
   label: 'Squarespace',
   docsUrl: 'https://developers.squarespace.com/commerce-apis/overview',
@@ -27,16 +27,16 @@ export const squarespace = {
   authHeaders(secret) {
     return { Authorization: `Bearer ${secret.api_key}` };
   },
-  async check(client) {
+  sections(client) {
     return {
-      connection: await section(async () => {
+      connection: async () => {
         const site = expectObject(await client.get('/1.0/authorization/website'));
         return { siteId: site.siteId ?? null, title: site.title ?? null, url: site.url ?? null, currency: site.currency ?? null, timeZone: site.timeZone ?? null };
-      }),
-      commerce_inventory: await section(async () => {
+      },
+      commerce_inventory: async () => {
         const result = expectObject(await client.get('/1.0/commerce/inventory'));
         return { items_on_first_page: expectArray(result.inventory).length, has_more: Boolean(result.pagination?.hasNextPage) };
-      })
+      }
     };
   }
-};
+});

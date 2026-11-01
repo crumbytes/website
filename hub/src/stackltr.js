@@ -2,7 +2,8 @@ import { writeAudit } from './audit.js';
 import { createPlatformClient, safeCode } from './adapters/framework.js';
 
 const MAX_ATTEMPTS = 8;
-const EVENT_PATHS = Object.freeze({ 'maintenance.completed': '/api/integrations/website-hub/v1/events' });
+const API = '/api/integrations/website-hub/v1';
+const EVENT_PATHS = Object.freeze({ 'maintenance.completed': `${API}/events` });
 
 // The StackLTR side of this contract does not exist yet: see
 // docs/stackltr-integration.md. Until it does, and until someone explicitly turns
@@ -15,6 +16,13 @@ export function createStackltrClient({ enabled, baseUrl, token }, http) {
     sendEvent: (path, event) => client.post(path, {
       json: event,
       headers: { 'Idempotency-Key': event.idempotency_key }
+    }),
+    // Read live and shown only to the person asking. Nothing here is stored.
+    searchCompanies: query => client.get(`${API}/companies`, { query: { query } }),
+    getCompany: (workspaceId, companyId) => client.get(`${API}/workspaces/${workspaceId}/companies/${companyId}`),
+    listRequests: (workspaceId, companyId) => client.get(`${API}/workspaces/${workspaceId}/companies/${companyId}/requests`),
+    createRequest: (workspaceId, companyId, body, idempotencyKey) => client.post(`${API}/workspaces/${workspaceId}/companies/${companyId}/requests`, {
+      json: body, headers: { 'Idempotency-Key': idempotencyKey }
     })
   };
 }

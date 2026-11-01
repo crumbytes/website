@@ -199,8 +199,9 @@ test('the stylesheet URL carries a content hash, so releases cannot show stale s
 });
 
 test('configuration fails closed', () => {
-  const base = { HUB_BASE_URL: 'https://hub.hub.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', DATABASE_URL: 'postgres://u@db.test/x' };
+  const base = { HUB_BASE_URL: 'https://hub.hub.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', DATABASE_URL: 'postgres://u@db.test/x', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for' };
   assert.equal(loadConfig(base).environment, 'production');
+  assert.throws(() => loadConfig({ ...base, HUB_TRUSTED_IP_HEADER: '' }), ConfigError);
   assert.equal(loadConfig(base).session.cookieName, '__Host-hub_session');
   assert.equal(loadConfig(base).session.secure, true);
   assert.equal(loadConfig(base).outboundEnabled, false);

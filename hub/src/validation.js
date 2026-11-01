@@ -32,6 +32,9 @@ export function normalizeWebUrl(value, { httpsOnly = false } = {}) {
   return url.href.replace(/\/$/, '');
 }
 
+const flag = z.preprocess(value => value === true || value === 'on' || value === 'true', z.boolean());
+const taskKind = z.enum(['inspection', 'software_update', 'plugin_update', 'content_request', 'security', 'backup_verification', 'other']);
+
 const webUrl = z.string().trim().max(2048).transform((value, ctx) => {
   const normalized = normalizeWebUrl(value);
   if (!normalized) {
@@ -63,7 +66,8 @@ export const schemas = {
     primary_url: webUrl,
     cms_platform: z.enum(['wordpress', 'shopify', 'wix', 'squarespace', 'joomla', 'other'], { message: 'Choose a platform' }),
     cms_other_name: optionalText(80),
-    hosting_provider: optionalText(120),
+    hosting_provider_id: optionalUuid,
+    account_owner_id: optionalUuid,
     service_plan_id: optionalUuid,
     lifecycle: z.enum(['active', 'paused', 'offboarded']).default('active'),
     notes: z.string().max(4000).default('')
@@ -79,6 +83,7 @@ export const schemas = {
     website_id: z.string().uuid('Choose a website'),
     title: text(1, 160),
     details: z.string().max(4000).default(''),
+    kind: taskKind.default('other'),
     priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
     assignee_id: optionalUuid,
     due_on: optionalDate,
@@ -88,10 +93,11 @@ export const schemas = {
     status: z.enum(['open', 'in_progress', 'blocked', 'cancelled']).optional(),
     assignee_id: optionalUuid
   }),
-  taskComplete: z.object({ completion_notes: text(3, 4000) }),
+  taskComplete: z.object({ completion_notes: text(3, 4000), completion_evidence_ref: optionalText(500) }),
   schedule: z.object({
     website_id: z.string().uuid(),
     title: text(1, 160),
+    kind: taskKind.default('inspection'),
     interval_days: z.coerce.number().int().min(1).max(366),
     next_due_on: dateOnly,
     default_assignee_id: optionalUuid
@@ -105,7 +111,10 @@ export const schemas = {
   monitoringCheck: z.object({
     website_id: z.string().uuid(),
     kind: z.enum(['uptime', 'ssl']),
-    interval_minutes: z.coerce.number().int().min(5).max(10080).default(60)
+    interval_minutes: z.coerce.number().int().min(5).max(10080).default(60),
+    failure_threshold: z.coerce.number().int().min(1).max(20).default(2),
+    response_warn_ms: optionalInt(100, 60000),
+    cert_warn_days: z.coerce.number().int().min(1).max(90).default(30)
   }),
   securityReview: z.object({
     website_id: z.string().uuid(),
@@ -120,7 +129,12 @@ export const schemas = {
     website_id: z.string().uuid(),
     provider: text(1, 80),
     label: text(1, 160),
-    expected_interval_hours: optionalInt(1, 8760)
+    expected_interval_hours: optionalInt(1, 8760),
+    schedule_description: optionalText(200),
+    retention_days: optionalInt(1, 3650),
+    storage_provider: z.enum(['manual', 'r2']).default('manual'),
+    storage_ref: optionalText(500),
+    encryption_method: optionalText(200)
   }),
   backupRun: z.object({
     source_id: z.string().uuid(),
@@ -138,6 +152,53 @@ export const schemas = {
     performed_at: notFuture
   }).refine(value => value.outcome !== 'passed' || (value.evidence_ref?.length ?? 0) >= 3, {
     path: ['evidence_ref'], message: 'A passed restore needs a reference to its evidence'
+  }),
+  hostingProvider: z.object({
+    name: text(1, 120),
+    support_url: z.preprocess(emptyToNull, z.string().trim().regex(/^https:\/\//, 'Use an https address').max(500).nullable().optional()),
+    notes: z.string().max(2000).default('')
+  }),
+  domain: z.object({
+    hostname: z.string().trim().toLowerCase().max(253).regex(/^(?=.{3,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/, 'Enter a domain such as example.com, without https://'),
+    is_primary: flag,
+    registrar: optionalText(120),
+    dns_provider: optionalText(120),
+    domain_owner: optionalText(160),
+    expires_on: optionalDate
+  }),
+  cmsVersion: z.object({ cms_version: z.string().trim().regex(/^[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}$/, 'Enter a version such as 6.7.1') }),
+  planTask: z.object({
+    title: text(1, 160),
+    kind: taskKind,
+    interval_days: z.coerce.number().int().min(1).max(366)
+  }),
+  applyPlan: z.object({ plan_id: z.string().uuid('Choose a plan'), first_due_on: dateOnly }),
+  report: z.object({ client_id: optionalUuid, from: dateOnly, to: dateOnly }).refine(value => value.from <= value.to, { path: ['to'], message: 'The end date must not be before the start date' }),
+  workLog: z.object({ note: text(3, 4000), minutes: optionalInt(1, 1440) }),
+  maintenanceWindow: z.object({
+    website_id: z.string().uuid(),
+    starts_at: dateTime,
+    ends_at: dateTime,
+    reason: text(3, 500)
+  }).refine(value => value.ends_at > value.starts_at, { path: ['ends_at'], message: 'The end must be after the start' }),
+  finding: z.object({
+    website_id: z.string().uuid(),
+    title: text(3, 200),
+    description: z.string().max(4000).default(''),
+    severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+    evidence_ref: optionalText(500)
+  }),
+  findingUpdate: z.object({
+    status: z.enum(['open', 'in_progress', 'accepted', 'resolved']),
+    evidence_ref: optionalText(500)
+  }),
+  recoveryRequest: z.object({ backup_run_id: z.string().uuid('Choose a backup run'), reason: text(5, 2000) }),
+  recoveryClose: z.object({
+    outcome: z.enum(['completed', 'failed']),
+    outcome_notes: text(3, 4000),
+    evidence_ref: optionalText(500)
+  }).refine(value => value.outcome !== 'completed' || (value.evidence_ref?.length ?? 0) >= 3, {
+    path: ['evidence_ref'], message: 'A completed recovery needs a reference to its evidence'
   }),
   staff: z.object({
     email: z.string().trim().toLowerCase().email().max(254),

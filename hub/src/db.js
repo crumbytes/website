@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -49,11 +50,40 @@ export function pgliteDriver(pglite) {
   };
 }
 
-export async function applyMigrations(pglite) {
+// Each file runs once, inside its own transaction, and is recorded with a checksum.
+// A file edited after it was applied stops the run, because history must not change.
+export async function migrate(executor, { log = () => {} } = {}) {
+  await executor.exec(`create schema if not exists hub_meta;
+    create table if not exists hub_meta.migrations (name text primary key, checksum text not null, applied_at timestamptz not null default now())`);
+  const applied = new Map((await executor.query(`select name, checksum from hub_meta.migrations`)).rows.map(row => [row.name, row.checksum]));
   const files = (await readdir(MIGRATIONS_DIR)).filter(name => name.endsWith('.sql')).sort();
+  const ran = [];
   for (const file of files) {
-    await pglite.exec(await readFile(path.join(MIGRATIONS_DIR, file), 'utf8'));
+    const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
+    const checksum = createHash('sha256').update(sql.replace(/\r\n/g, '\n')).digest('hex');
+    if (applied.has(file)) {
+      if (applied.get(file) !== checksum) throw new Error(`Migration ${file} changed after it was applied. Add a new migration instead.`);
+      continue;
+    }
+    log(`Applying ${file}`);
+    await executor.exec(`begin;\n${sql}\ninsert into hub_meta.migrations (name, checksum) values ('${file}', '${checksum}');\ncommit;`);
+    ran.push(file);
   }
+  return ran;
+}
+
+export const applyMigrations = pglite => migrate(pglite);
+
+// Creates the first owner. Later staff are added in the app, so this refuses to run twice.
+export async function provisionFirstOwner(executor, { email, displayName }) {
+  const { rows } = await executor.query(`select 1 from hub.staff_users where role = 'owner' limit 1`);
+  if (rows.length) throw new Error('An owner already exists. Add staff in the app.');
+  const created = await executor.query(
+    `insert into hub.staff_users (email, display_name, role) values ($1, $2, 'owner') returning id`, [email.trim().toLowerCase(), displayName.trim()]);
+  await executor.query(
+    `insert into hub.audit_log (actor_type, action, entity_type, entity_id, metadata, prev_hash, entry_hash)
+     values ('system', 'staff.provision_owner', 'staff_user', $1, '{}', '', '')`, [created.rows[0].id]);
+  return created.rows[0].id;
 }
 
 export const one = result => result.rows[0] ?? null;

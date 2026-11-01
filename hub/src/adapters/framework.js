@@ -31,16 +31,18 @@ export const ERROR_MESSAGES = Object.freeze({
   upstream_error: 'The platform reported an internal error.',
   response_too_large: 'The platform response was larger than the hub accepts.',
   outbound_disabled: 'Outbound connections are turned off for this environment.',
+  backing_off: 'The platform asked the hub to wait. The check was not sent.',
   no_credential: 'No credential is stored for this connection.',
   operation_rejected: 'The platform refused the requested change.',
   internal_error: 'The check failed before it could finish.'
 });
 
 export class AdapterError extends Error {
-  constructor(code, status) {
+  constructor(code, status, retryAfterSeconds) {
     super(code);
     this.code = code;
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -82,7 +84,10 @@ export function createPlatformClient({ baseUrl, http, authHeaders = {}, timeoutM
         if (error instanceof OutboundError) throw new AdapterError(error.code);
         throw new AdapterError('network_error');
       }
-      if (response.status < 200 || response.status >= 300) throw new AdapterError(codeForStatus(response.status), response.status);
+      if (response.status < 200 || response.status >= 300) {
+        const retryAfter = Number(response.headers?.['retry-after']);
+        throw new AdapterError(codeForStatus(response.status), response.status, Number.isFinite(retryAfter) ? retryAfter : undefined);
+      }
       if (!response.body) return null;
       try {
         return JSON.parse(response.body);
@@ -111,7 +116,7 @@ export async function section(fn) {
     return { status: 'ok', data: await fn() };
   } catch (error) {
     const code = error instanceof AdapterError ? error.code : 'internal_error';
-    return { status: code === 'permission_required' ? 'permission_required' : 'error', code };
+    return { status: code === 'permission_required' ? 'permission_required' : 'error', code, ...(error?.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}) };
   }
 }
 
@@ -122,6 +127,22 @@ export function summarizeSections(sections) {
     return { outcome: 'partial', code: values.find(item => item.status !== 'ok').code ?? 'permission_required' };
   }
   return { outcome: 'failed', code: values[0]?.code ?? 'internal_error' };
+}
+
+// Gives each adapter the same two entry points from its named sections. A
+// connection test runs only the connection section, so it stays light on rate limits.
+export function defineAdapter(definition) {
+  const run = async (client, context, names) => {
+    const sections = definition.sections(client, context);
+    const results = {};
+    for (const name of names ?? Object.keys(sections)) results[name] = await section(sections[name]);
+    return results;
+  };
+  return {
+    ...definition,
+    check: (client, context = {}) => run(client, context),
+    testConnection: (client, context = {}) => run(client, context, ['connection'])
+  };
 }
 
 // Maps an arbitrary failure to a code that is safe to store and display.

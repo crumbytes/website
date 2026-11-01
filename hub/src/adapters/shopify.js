@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AdapterError, createPlatformClient, expectArray, expectObject, section, SUPPORT } from './framework.js';
+import { AdapterError, createPlatformClient, defineAdapter, expectArray, expectObject, SUPPORT } from './framework.js';
 
 // Pinned on purpose. Shopify retires versions on a schedule, so moving this is a
 // reviewed change rather than something that happens on its own.
@@ -17,7 +17,7 @@ async function graphql(client, query, variables) {
   return expectObject(result.data);
 }
 
-export const shopify = {
+export const shopify = defineAdapter({
   key: 'shopify',
   label: 'Shopify',
   docsUrl: 'https://shopify.dev/docs/api/admin-graphql',
@@ -75,20 +75,20 @@ export const shopify = {
     if (typeof token.access_token !== 'string' || !token.access_token) throw new AdapterError('invalid_response');
     return { 'X-Shopify-Access-Token': token.access_token };
   },
-  async check(client) {
+  sections(client) {
     return {
-      connection: await section(async () => {
+      connection: async () => {
         const { shop } = await graphql(client, `{ shop { name myshopifyDomain ianaTimezone currencyCode setupRequired checkoutApiSupported primaryDomain { url sslEnabled } } }`);
         return expectObject(shop);
-      }),
-      granted_scopes: await section(async () => {
+      },
+      granted_scopes: async () => {
         const { currentAppInstallation } = await graphql(client, `{ currentAppInstallation { accessScopes { handle } } }`);
         return expectArray(currentAppInstallation?.accessScopes).map(scope => scope.handle);
-      }),
-      theme_inventory: await section(async () => {
+      },
+      theme_inventory: async () => {
         const { themes } = await graphql(client, `{ themes(first: 25) { nodes { id name role updatedAt } } }`);
         return expectArray(themes?.nodes);
-      })
+      }
     };
   },
   async runOperation(client, key, params) {
@@ -99,4 +99,4 @@ export const shopify = {
       if (data.urlRedirectCreate?.userErrors?.length) throw new AdapterError('operation_rejected');
     }
   }
-};
+});

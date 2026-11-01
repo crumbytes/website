@@ -107,7 +107,7 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
       if (!rawToken) return null;
       return db.as('hub_auth', null, async tx => {
         const row = one(await tx.query(
-          `select s.csrf_token, s.last_seen_at, u.id, u.email, u.display_name, u.role
+          `select s.id as session_id, s.csrf_token, s.last_seen_at, u.id, u.email, u.display_name, u.role
            from hub.staff_sessions s join hub.staff_users u on u.id = s.staff_id
            where s.token_hash = $1 and s.revoked_at is null and s.idle_expires_at > $2
              and s.absolute_expires_at > $2 and u.status = 'active'`,
@@ -121,7 +121,8 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
         }
         return {
           staff: { id: row.id, email: row.email, display_name: row.display_name, role: row.role },
-          csrfToken: row.csrf_token
+          csrfToken: row.csrf_token,
+          sessionId: row.session_id
         };
       });
     },
@@ -149,10 +150,11 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
     const raw = token();
     const issued = now();
     await tx.query(
-      `insert into hub.staff_sessions (token_hash, staff_id, csrf_token, created_at, last_seen_at, idle_expires_at, absolute_expires_at)
-       values ($1, $2, $3, $4, $4, $5, $6)`,
+      `insert into hub.staff_sessions (token_hash, staff_id, csrf_token, created_at, last_seen_at, idle_expires_at, absolute_expires_at, mfa_reported)
+       values ($1, $2, $3, $4, $4, $5, $6, $7)`,
       [sha256(raw), staff.id, token(), issued, new Date(issued.getTime() + session.idleMinutes * 60000),
-        new Date(issued.getTime() + session.absoluteMinutes * 60000)]);
+        new Date(issued.getTime() + session.absoluteMinutes * 60000),
+        Array.isArray(claims.amr) && claims.amr.some(item => ['mfa', 'otp', 'hwk', 'swk', 'fido'].includes(item))]);
     await tx.query(`update hub.staff_users set last_login_at = $2 where id = $1`, [staff.id, issued]);
     await writeAudit(tx, { staffId: staff.id, action: 'auth.login', requestId });
     return { sessionToken: raw };

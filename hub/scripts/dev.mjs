@@ -85,7 +85,9 @@ const config = loadConfig({
   HUB_ENV: 'development',
   HUB_BASE_URL: `http://localhost:${APP_PORT}`,
   HUB_OIDC_ISSUER: issuer,
-  HUB_OIDC_CLIENT_ID: 'hub-dev'
+  HUB_OIDC_CLIENT_ID: 'hub-dev',
+  // Everyone on a laptop shares one address, so limits only get in the way here.
+  HUB_RATE_LIMITS_ENABLED: 'false'
 });
 const app = buildApp({ config, db: createDb(pgliteDriver(pglite)) });
 serve({ fetch: app.fetch, port: APP_PORT, hostname: HOST }, () => {

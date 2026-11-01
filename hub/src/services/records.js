@@ -1,8 +1,9 @@
 import { auditStaff } from '../audit.js';
 import { requirePermission } from '../authz.js';
 import { one } from '../db.js';
-import { conflict, invalid, notFound } from '../errors.js';
+import { conflict, forbidden, invalid, notFound } from '../errors.js';
 import { isUuid, parse, schemas } from '../validation.js';
+import { riskFor } from './insights.js';
 
 const asStaff = (ctx, fn) => ctx.db.as('hub_app', ctx.staff.id, fn);
 
@@ -22,7 +23,7 @@ async function guarded(fn, uniqueMessage = 'That record already exists.') {
 // Staff get the same response whether a record is missing or not theirs.
 async function visibleWebsite(tx, websiteId) {
   if (!isUuid(websiteId)) throw notFound();
-  const row = one(await tx.query(`select id, client_account_id from hub.managed_websites where id = $1`, [websiteId]));
+  const row = one(await tx.query(`select id, client_account_id, lifecycle from hub.managed_websites where id = $1`, [websiteId]));
   if (!row) throw notFound();
   return row;
 }
@@ -33,7 +34,7 @@ export async function listClients(ctx) {
   requirePermission(ctx.staff, 'client.read');
   return asStaff(ctx, async tx => (await tx.query(
     `select c.id, c.display_name, c.status, c.stackltr_company_id, c.stackltr_billing_ref,
-       (select count(*)::int from hub.managed_websites w where w.client_account_id = c.id and w.lifecycle <> 'offboarded') as website_count
+       (select count(*)::int from hub.managed_websites w where w.client_account_id = c.id and w.lifecycle not in ('offboarded', 'archived')) as website_count
      from hub.client_accounts c order by lower(c.display_name)`)).rows);
 }
 
@@ -95,38 +96,64 @@ export async function createPlan(ctx, input) {
 
 // Websites -------------------------------------------------------------------
 
-const WEBSITE_LIST = `
-  select w.id, w.client_account_id, w.display_name, w.primary_url, w.cms_platform, w.cms_other_name, w.hosting_provider, w.lifecycle,
-    c.display_name as client_name, p.name as plan_name,
+// One query builds the management profile, so the list and the detail page agree.
+const WEBSITE_PROFILE = `
+  select w.id, w.client_account_id, w.display_name, w.primary_url, w.cms_platform, w.cms_other_name, w.lifecycle, w.hosting_provider_id, w.service_plan_id,
+    w.account_owner_id, w.cms_version, w.cms_version_source, w.cms_version_recorded_at, w.archived_at, w.notes,
+    c.display_name as client_name, c.stackltr_company_id, c.stackltr_billing_ref, p.name as plan_name, h.name as hosting_provider, o.display_name as account_owner_name,
+    (select d.hostname from hub.website_domains d where d.website_id = w.id and d.is_primary limit 1) as primary_domain,
     (select count(*)::int from hub.maintenance_tasks t where t.website_id = w.id and t.status in ('open', 'in_progress', 'blocked')) as open_tasks,
-    (select r.outcome from hub.monitoring_results r join hub.monitoring_checks m on m.id = r.check_id
-       where m.website_id = w.id and m.kind = 'uptime' order by r.checked_at desc limit 1) as uptime_outcome,
-    (select r.checked_at from hub.monitoring_results r join hub.monitoring_checks m on m.id = r.check_id
-       where m.website_id = w.id and m.kind = 'uptime' order by r.checked_at desc limit 1) as uptime_checked_at
+    (select max(t.completed_at) from hub.maintenance_tasks t where t.website_id = w.id and t.status = 'completed') as last_maintenance_at,
+    (select min(m.next_due_on)::text from hub.maintenance_schedules m where m.website_id = w.id and m.active) as next_maintenance_on,
+    uptime.outcome as uptime_outcome, uptime.checked_at as uptime_checked_at,
+    (select count(*)::int from hub.incidents i where i.website_id = w.id and i.status = 'open') as open_incidents,
+    (select count(*)::int from hub.backup_sources b where b.website_id = w.id and b.active) as backup_source_count,
+    (select r.status from hub.backup_runs r join hub.backup_sources b on b.id = r.source_id where b.website_id = w.id order by r.finished_at desc limit 1) as latest_backup_status,
+    (select max(v.performed_at) from hub.restore_verifications v join hub.backup_runs r on r.id = v.backup_run_id join hub.backup_sources b on b.id = r.source_id where b.website_id = w.id and v.outcome = 'passed') as latest_passed_at,
+    (select max(v.performed_at) from hub.restore_verifications v join hub.backup_runs r on r.id = v.backup_run_id join hub.backup_sources b on b.id = r.source_id where b.website_id = w.id and v.outcome <> 'passed') as latest_failed_at,
+    (select max(s.reviewed_at) from hub.security_reviews s where s.website_id = w.id) as last_review_at,
+    (select f.severity from hub.security_findings f where f.website_id = w.id and f.status in ('open', 'in_progress')
+       order by array_position(array['info','low','medium','high','critical'], f.severity) desc limit 1) as highest_open_severity
   from hub.managed_websites w
   join hub.client_accounts c on c.id = w.client_account_id
-  left join hub.service_plans p on p.id = w.service_plan_id`;
+  left join hub.service_plans p on p.id = w.service_plan_id
+  left join hub.hosting_providers h on h.id = w.hosting_provider_id
+  left join hub.staff_users o on o.id = w.account_owner_id
+  left join lateral (select r.outcome, r.checked_at from hub.monitoring_results r join hub.monitoring_checks m on m.id = r.check_id
+    where m.website_id = w.id and m.kind = 'uptime' order by r.checked_at desc limit 1) uptime on true`;
 
-export async function listWebsites(ctx, { search } = {}) {
+const withProfile = row => ({
+  ...row,
+  recoverability: recoverabilityOf({ latestRunStatus: row.latest_backup_status, latestPassedAt: row.latest_passed_at, latestFailedAt: row.latest_failed_at }),
+  risk: riskFor({ highestOpenSeverity: row.highest_open_severity, lastReviewAt: row.last_review_at })
+});
+
+export async function listWebsites(ctx, filters = {}) {
   requirePermission(ctx.staff, 'website.read');
-  const term = typeof search === 'string' ? search.trim().slice(0, 100) : '';
-  return asStaff(ctx, async tx => (await tx.query(
-    `${WEBSITE_LIST}
-     where $1 = '' or w.display_name ilike '%' || $1 || '%' or w.primary_url ilike '%' || $1 || '%' or c.display_name ilike '%' || $1 || '%'
-     order by lower(c.display_name), lower(w.display_name) limit 500`, [term])).rows);
+  const term = typeof filters.search === 'string' ? filters.search.trim().slice(0, 100) : '';
+  const lifecycle = ['active', 'paused', 'offboarded', 'archived', 'all'].includes(filters.lifecycle) ? filters.lifecycle : 'current';
+  const platform = typeof filters.platform === 'string' && filters.platform ? filters.platform : null;
+  const hosting = isUuid(filters.hosting) ? filters.hosting : null;
+  const client = isUuid(filters.client) ? filters.client : null;
+  const monitoring = ['up', 'down', 'error', 'unknown'].includes(filters.monitoring) ? filters.monitoring : null;
+  const rows = await asStaff(ctx, async tx => (await tx.query(
+    `${WEBSITE_PROFILE}
+     where ($1 = '' or w.display_name ilike '%' || $1 || '%' or w.primary_url ilike '%' || $1 || '%' or c.display_name ilike '%' || $1 || '%')
+       and ($2 = 'all' or ($2 = 'current' and w.lifecycle <> 'archived') or w.lifecycle = $2)
+       and ($3::text is null or w.cms_platform = $3)
+       and ($4::uuid is null or w.hosting_provider_id = $4)
+       and ($5::uuid is null or w.client_account_id = $5)
+       and ($6::text is null or ($6 = 'unknown' and uptime.outcome is null) or uptime.outcome = $6)
+     order by lower(c.display_name), lower(w.display_name) limit 500`, [term, lifecycle, platform, hosting, client, monitoring])).rows);
+  return rows.map(withProfile);
 }
 
 export async function getWebsite(ctx, id) {
   requirePermission(ctx.staff, 'website.read');
   if (!isUuid(id)) throw notFound();
-  const row = await asStaff(ctx, async tx => one(await tx.query(`
-    select w.*, c.display_name as client_name, c.stackltr_company_id, c.stackltr_billing_ref, p.name as plan_name
-    from hub.managed_websites w
-    join hub.client_accounts c on c.id = w.client_account_id
-    left join hub.service_plans p on p.id = w.service_plan_id
-    where w.id = $1`, [id])));
+  const row = await asStaff(ctx, async tx => one(await tx.query(`${WEBSITE_PROFILE} where w.id = $1`, [id])));
   if (!row) throw notFound();
-  return row;
+  return withProfile(row);
 }
 
 export async function createWebsite(ctx, input) {
@@ -137,9 +164,9 @@ export async function createWebsite(ctx, input) {
       throw invalid({ client_account_id: 'Choose a client you are assigned to.' });
     }
     const row = one(await tx.query(
-      `insert into hub.managed_websites (client_account_id, display_name, primary_url, cms_platform, cms_other_name, hosting_provider, service_plan_id, lifecycle, notes, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
-      [data.client_account_id, data.display_name, data.primary_url, data.cms_platform, data.cms_other_name, data.hosting_provider ?? null,
+      `insert into hub.managed_websites (client_account_id, display_name, primary_url, cms_platform, cms_other_name, hosting_provider_id, account_owner_id, service_plan_id, lifecycle, notes, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
+      [data.client_account_id, data.display_name, data.primary_url, data.cms_platform, data.cms_other_name, data.hosting_provider_id ?? null, data.account_owner_id ?? null,
         data.service_plan_id ?? null, data.lifecycle, data.notes, ctx.staff.id]));
     await auditStaff(tx, ctx, 'website.create', { entityType: 'managed_website', entityId: row.id, clientId: data.client_account_id, metadata: { url: data.primary_url, platform: data.cms_platform } });
     return row;
@@ -151,12 +178,13 @@ export async function updateWebsite(ctx, id, input) {
   const data = parse(schemas.website, input);
   return guarded(() => asStaff(ctx, async tx => {
     const current = await visibleWebsite(tx, id);
+    if (current.lifecycle === 'archived') throw conflict('Restore this website before editing it.');
     // Moving a site between clients would carry its history across the boundary.
     if (current.client_account_id !== data.client_account_id) throw invalid({ client_account_id: 'A website cannot move to another client.' });
     await tx.query(
-      `update hub.managed_websites set display_name = $2, primary_url = $3, cms_platform = $4, cms_other_name = $5, hosting_provider = $6,
-         service_plan_id = $7, lifecycle = $8, notes = $9, updated_at = now() where id = $1`,
-      [id, data.display_name, data.primary_url, data.cms_platform, data.cms_other_name, data.hosting_provider ?? null, data.service_plan_id ?? null, data.lifecycle, data.notes]);
+      `update hub.managed_websites set display_name = $2, primary_url = $3, cms_platform = $4, cms_other_name = $5, hosting_provider_id = $6,
+         account_owner_id = $7, service_plan_id = $8, lifecycle = $9, notes = $10, updated_at = now() where id = $1`,
+      [id, data.display_name, data.primary_url, data.cms_platform, data.cms_other_name, data.hosting_provider_id ?? null, data.account_owner_id ?? null, data.service_plan_id ?? null, data.lifecycle, data.notes]);
     await auditStaff(tx, ctx, 'website.update', { entityType: 'managed_website', entityId: id, clientId: current.client_account_id, metadata: { url: data.primary_url, lifecycle: data.lifecycle } });
     return { id };
   }), 'A website with that address is already managed.');
@@ -167,7 +195,7 @@ export async function updateWebsite(ctx, id, input) {
 export async function listTasks(ctx, { websiteId, scope = 'open' } = {}) {
   requirePermission(ctx.staff, 'maintenance.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select t.id, t.website_id, t.client_account_id, t.title, t.details, t.status, t.priority, t.assignee_id, t.due_on::text as due_on, t.completed_at,
+    `select t.id, t.website_id, t.client_account_id, t.title, t.details, t.kind, t.status, t.priority, t.requires_approval, t.approved_at, t.created_by, t.assignee_id, t.due_on::text as due_on, t.completed_at,
        t.completion_notes, t.stackltr_request_id, w.display_name as website_name, c.display_name as client_name, s.display_name as assignee_name
      from hub.maintenance_tasks t
      join hub.managed_websites w on w.id = t.website_id
@@ -178,6 +206,9 @@ export async function listTasks(ctx, { websiteId, scope = 'open' } = {}) {
      order by t.due_on nulls last, t.created_at desc limit 200`,
     [websiteId ?? null, scope])).rows);
 }
+
+// Updates can break a live site, so a second person approves them first.
+const DISRUPTIVE_KINDS = new Set(['software_update', 'plugin_update']);
 
 async function assertAssignable(tx, assigneeId, clientId) {
   if (!assigneeId) return;
@@ -196,9 +227,9 @@ export async function createTask(ctx, input) {
     const website = await visibleWebsite(tx, data.website_id);
     await assertAssignable(tx, data.assignee_id, website.client_account_id);
     const row = one(await tx.query(
-      `insert into hub.maintenance_tasks (client_account_id, website_id, title, details, priority, assignee_id, due_on, stackltr_request_id, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
-      [website.client_account_id, website.id, data.title, data.details, data.priority, data.assignee_id ?? null, data.due_on ?? null, data.stackltr_request_id ?? null, ctx.staff.id]));
+      `insert into hub.maintenance_tasks (client_account_id, website_id, title, details, kind, requires_approval, priority, assignee_id, due_on, stackltr_request_id, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
+      [website.client_account_id, website.id, data.title, data.details, data.kind, DISRUPTIVE_KINDS.has(data.kind), data.priority, data.assignee_id ?? null, data.due_on ?? null, data.stackltr_request_id ?? null, ctx.staff.id]));
     await auditStaff(tx, ctx, 'task.create', { entityType: 'maintenance_task', entityId: row.id, clientId: website.client_account_id, metadata: { title: data.title, assignee_id: data.assignee_id ?? null } });
     return row;
   }));
@@ -234,9 +265,10 @@ export async function completeTask(ctx, id, input) {
     if (!task) throw notFound();
     if (task.status === 'completed') throw conflict('This task is already completed.');
     if (task.status === 'cancelled') throw conflict('A cancelled task cannot be completed.');
+    if (task.requires_approval && !task.approved_at) throw conflict('This change needs approval before it can be completed.');
     await tx.query(
-      `update hub.maintenance_tasks set status = 'completed', completed_at = now(), completed_by = $2, completion_notes = $3, updated_at = now() where id = $1`,
-      [id, ctx.staff.id, data.completion_notes]);
+      `update hub.maintenance_tasks set status = 'completed', completed_at = now(), completed_by = $2, completion_notes = $3, completion_evidence_ref = $4, updated_at = now() where id = $1`,
+      [id, ctx.staff.id, data.completion_notes, data.completion_evidence_ref ?? null]);
     await tx.query(
       `insert into hub.service_history (client_account_id, website_id, task_id, kind, summary, source, performed_by)
        values ($1, $2, $3, 'maintenance', $4, 'staff', $5)`,
@@ -256,10 +288,47 @@ export async function completeTask(ctx, id, input) {
   }));
 }
 
+export async function approveTask(ctx, id) {
+  requirePermission(ctx.staff, 'operation.decide');
+  if (!isUuid(id)) throw notFound();
+  return guarded(() => asStaff(ctx, async tx => {
+    const task = one(await tx.query(`select id, client_account_id, website_id, created_by, requires_approval, approved_at from hub.maintenance_tasks where id = $1`, [id]));
+    if (!task) throw notFound();
+    if (!task.requires_approval) throw conflict('This task does not need approval.');
+    if (task.approved_at) throw conflict('This task is already approved.');
+    if (task.created_by === ctx.staff.id) throw forbidden('A second person must approve your request.');
+    await tx.query(`update hub.maintenance_tasks set approved_by = $2, approved_at = now(), updated_at = now() where id = $1`, [id, ctx.staff.id]);
+    await auditStaff(tx, ctx, 'task.approve', { entityType: 'maintenance_task', entityId: id, clientId: task.client_account_id });
+    return { id, website_id: task.website_id };
+  }));
+}
+
+export async function addWorkLog(ctx, taskId, input) {
+  requirePermission(ctx.staff, 'maintenance.write');
+  if (!isUuid(taskId)) throw notFound();
+  const data = parse(schemas.workLog, input);
+  return guarded(() => asStaff(ctx, async tx => {
+    const task = one(await tx.query(`select id, client_account_id, website_id from hub.maintenance_tasks where id = $1`, [taskId]));
+    if (!task) throw notFound();
+    await tx.query(`insert into hub.task_work_logs (client_account_id, task_id, note, minutes, staff_id) values ($1, $2, $3, $4, $5)`,
+      [task.client_account_id, taskId, data.note, data.minutes ?? null, ctx.staff.id]);
+    await auditStaff(tx, ctx, 'task.work_log', { entityType: 'maintenance_task', entityId: taskId, clientId: task.client_account_id, metadata: { minutes: data.minutes ?? null } });
+    return { id: taskId, website_id: task.website_id };
+  }));
+}
+
+export async function listWorkLogs(ctx, websiteId) {
+  requirePermission(ctx.staff, 'maintenance.read');
+  return asStaff(ctx, async tx => (await tx.query(
+    `select l.id, l.task_id, l.note, l.minutes, l.logged_at, t.title as task_title, s.display_name as staff_name
+     from hub.task_work_logs l join hub.maintenance_tasks t on t.id = l.task_id join hub.staff_users s on s.id = l.staff_id
+     where t.website_id = $1 order by l.logged_at desc limit 100`, [websiteId])).rows);
+}
+
 export async function listSchedules(ctx, { websiteId } = {}) {
   requirePermission(ctx.staff, 'maintenance.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select m.id, m.website_id, m.title, m.interval_days, m.next_due_on::text as next_due_on, m.active, m.client_account_id,
+    `select m.id, m.website_id, m.title, m.kind, m.interval_days, m.next_due_on::text as next_due_on, m.active, m.client_account_id,
        w.display_name as website_name, c.display_name as client_name, s.display_name as assignee_name
      from hub.maintenance_schedules m
      join hub.managed_websites w on w.id = m.website_id
@@ -275,9 +344,9 @@ export async function createSchedule(ctx, input) {
     const website = await visibleWebsite(tx, data.website_id);
     await assertAssignable(tx, data.default_assignee_id, website.client_account_id);
     const row = one(await tx.query(
-      `insert into hub.maintenance_schedules (client_account_id, website_id, title, interval_days, next_due_on, default_assignee_id, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-      [website.client_account_id, website.id, data.title, data.interval_days, data.next_due_on, data.default_assignee_id ?? null, ctx.staff.id]));
+      `insert into hub.maintenance_schedules (client_account_id, website_id, title, kind, interval_days, next_due_on, default_assignee_id, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+      [website.client_account_id, website.id, data.title, data.kind, data.interval_days, data.next_due_on, data.default_assignee_id ?? null, ctx.staff.id]));
     await auditStaff(tx, ctx, 'schedule.create', { entityType: 'maintenance_schedule', entityId: row.id, clientId: website.client_account_id, metadata: { title: data.title, interval_days: data.interval_days } });
     return row;
   }));
@@ -293,9 +362,9 @@ export async function createTaskFromSchedule(ctx, id) {
     const open = one(await tx.query(`select id from hub.maintenance_tasks where schedule_id = $1 and status in ('open', 'in_progress', 'blocked') limit 1`, [id]));
     if (open) throw conflict('This schedule already has an open task.');
     const row = one(await tx.query(
-      `insert into hub.maintenance_tasks (client_account_id, website_id, schedule_id, title, assignee_id, due_on, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-      [schedule.client_account_id, schedule.website_id, id, schedule.title, schedule.default_assignee_id, schedule.due, ctx.staff.id]));
+      `insert into hub.maintenance_tasks (client_account_id, website_id, schedule_id, title, kind, requires_approval, assignee_id, due_on, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [schedule.client_account_id, schedule.website_id, id, schedule.title, schedule.kind, DISRUPTIVE_KINDS.has(schedule.kind), schedule.default_assignee_id, schedule.due, ctx.staff.id]));
     await auditStaff(tx, ctx, 'task.create', { entityType: 'maintenance_task', entityId: row.id, clientId: schedule.client_account_id, metadata: { title: schedule.title, schedule_id: id } });
     return row;
   }));
@@ -330,7 +399,7 @@ export async function addHistory(ctx, input) {
 export async function listChecks(ctx, { websiteId } = {}) {
   requirePermission(ctx.staff, 'monitoring.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select m.id, m.website_id, m.kind, m.target_url, m.interval_minutes, m.enabled, m.next_run_at,
+    `select m.id, m.website_id, m.kind, m.target_url, m.interval_minutes, m.enabled, m.next_run_at, m.failure_threshold, m.response_warn_ms, m.cert_warn_days,
        w.display_name as website_name, c.display_name as client_name,
        r.outcome, r.http_status, r.response_ms, r.tls_valid_to, r.tls_issuer, r.error_code, r.checked_at
      from hub.monitoring_checks m
@@ -348,9 +417,9 @@ export async function createCheck(ctx, input) {
     const { primary_url: target } = one(await tx.query(`select primary_url from hub.managed_websites where id = $1`, [website.id]));
     if (data.kind === 'ssl' && !target.startsWith('https://')) throw invalid({ kind: 'A certificate check needs an https address.' });
     const row = one(await tx.query(
-      `insert into hub.monitoring_checks (client_account_id, website_id, kind, target_url, interval_minutes, created_by)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [website.client_account_id, website.id, data.kind, target, data.interval_minutes, ctx.staff.id]));
+      `insert into hub.monitoring_checks (client_account_id, website_id, kind, target_url, interval_minutes, failure_threshold, response_warn_ms, cert_warn_days, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [website.client_account_id, website.id, data.kind, target, data.interval_minutes, data.failure_threshold, data.response_warn_ms ?? null, data.cert_warn_days, ctx.staff.id]));
     await auditStaff(tx, ctx, 'monitoring.enable', { entityType: 'monitoring_check', entityId: row.id, clientId: website.client_account_id, metadata: { kind: data.kind } });
     return row;
   }), 'That check already exists for this website.');
@@ -409,7 +478,7 @@ export function recoverabilityOf({ latestRunStatus, latestPassedAt, latestFailed
 export async function listBackupSources(ctx, { websiteId } = {}) {
   requirePermission(ctx.staff, 'backup.read');
   const rows = await asStaff(ctx, async tx => (await tx.query(
-    `select b.id, b.website_id, b.provider, b.label, b.expected_interval_hours, b.active, w.display_name as website_name, c.display_name as client_name,
+    `select b.id, b.website_id, b.provider, b.label, b.expected_interval_hours, b.active, b.schedule_description, b.retention_days, b.storage_provider, b.storage_ref, b.encryption_method, w.display_name as website_name, c.display_name as client_name,
        latest.id as latest_run_id, latest.status as latest_run_status, latest.finished_at as latest_run_finished_at,
        (select max(v.performed_at) from hub.restore_verifications v join hub.backup_runs r on r.id = v.backup_run_id
          where r.source_id = b.id and v.outcome = 'passed') as latest_passed_at,
@@ -432,9 +501,9 @@ export async function createBackupSource(ctx, input) {
   return guarded(() => asStaff(ctx, async tx => {
     const website = await visibleWebsite(tx, data.website_id);
     const row = one(await tx.query(
-      `insert into hub.backup_sources (client_account_id, website_id, provider, label, expected_interval_hours, created_by)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [website.client_account_id, website.id, data.provider, data.label, data.expected_interval_hours ?? null, ctx.staff.id]));
+      `insert into hub.backup_sources (client_account_id, website_id, provider, label, expected_interval_hours, schedule_description, retention_days, storage_provider, storage_ref, encryption_method, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
+      [website.client_account_id, website.id, data.provider, data.label, data.expected_interval_hours ?? null, data.schedule_description ?? null, data.retention_days ?? null, data.storage_provider, data.storage_ref ?? null, data.encryption_method ?? null, ctx.staff.id]));
     await auditStaff(tx, ctx, 'backup_source.create', { entityType: 'backup_source', entityId: row.id, clientId: website.client_account_id, metadata: { provider: data.provider } });
     return row;
   }));
@@ -586,7 +655,9 @@ export async function getOverview(ctx) {
   return asStaff(ctx, async tx => {
     const row = one(await tx.query(`
       select
-        (select count(*)::int from hub.managed_websites where lifecycle <> 'offboarded') as websites,
+        (select count(*)::int from hub.managed_websites where lifecycle not in ('offboarded', 'archived')) as websites,
+        (select count(*)::int from hub.incidents where status = 'open') as open_incidents,
+        (select count(*)::int from hub.security_findings where status in ('open', 'in_progress')) as open_findings,
         (select count(*)::int from hub.maintenance_tasks where status in ('open', 'in_progress', 'blocked')) as open_tasks,
         (select count(*)::int from hub.maintenance_tasks where status in ('open', 'in_progress', 'blocked') and due_on < current_date) as overdue_tasks,
         (select count(*)::int from hub.maintenance_schedules where active and next_due_on <= current_date + 7) as schedules_due,

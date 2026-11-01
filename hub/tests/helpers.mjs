@@ -16,7 +16,7 @@ export async function createHarness({ env = {}, http, logger } = {}) {
   await applyMigrations(pg);
   const db = createDb(pgliteDriver(pg));
   const config = loadConfig({
-    HUB_ENV: 'test', HUB_BASE_URL: ORIGIN, HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'hub-test', ...env
+    HUB_ENV: 'test', HUB_BASE_URL: ORIGIN, HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'hub-test', HUB_RATE_LIMITS_ENABLED: 'false', ...env
   });
 
   const keys = await generateKeyPair('RS256');
@@ -44,7 +44,7 @@ export async function createHarness({ env = {}, http, logger } = {}) {
     throw new Error(`Unexpected identity provider request: ${href}`);
   };
 
-  const app = buildApp({ config, db, fetchImpl, http, logger: logger ?? { error() {} } });
+  const app = buildApp({ config, db, fetchImpl, http, logger: { info() {}, warn() {}, error() {}, ...logger } });
 
   async function startLogin() {
     const res = await app.request('/auth/start');

@@ -3,16 +3,22 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { html } from 'hono/html';
+import { ERROR_MESSAGES, safeCode } from './adapters/framework.js';
 import { ADAPTERS, OTHER_PLATFORM } from './adapters/index.js';
 import { writeAudit } from './audit.js';
 import { createAuth, LoginDenied, safeEqual } from './auth.js';
 import { can, requirePermission } from './authz.js';
 import { HubError } from './errors.js';
+import { createLogger } from './logger.js';
+import { createRateLimiter } from './rate-limit.js';
 import { runJobs } from './services/jobs.js';
 import * as connections from './services/connections.js';
+import * as insights from './services/insights.js';
+import * as inventory from './services/inventory.js';
 import * as records from './services/records.js';
 import { barePage } from './ui/layout.js';
 import * as pages from './ui/pages.js';
+import * as pages2 from './ui/pages2.js';
 import { HUB_CSS } from './ui/styles.js';
 
 const CSP = "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -23,24 +29,46 @@ const isApi = path => path.startsWith('/api/');
 const safeReturn = (value, fallback) => (typeof value === 'string' && /^\/(?![/\\])[A-Za-z0-9/_-]*$/.test(value) ? value : fallback);
 
 export function createApp(deps) {
-  const { db, config, vault, http, stackltr, logger = console, fetchImpl, now } = deps;
+  const { db, config, vault, http, stackltr, email, backupProviders, logger = createLogger(), fetchImpl, now } = deps;
   const auth = createAuth({ db, config, fetchImpl, now });
+  const limiter = createRateLimiter({ db, now });
+
+  // The header is honoured only when configured, because a client can forge it otherwise.
+  const clientKey = c => (config.trustedIpHeader ? c.req.header(config.trustedIpHeader)?.split(',')[0]?.trim() : null) ?? 'shared';
+  const limited = async (c, kind, identity) => {
+    if (!config.rateLimitsEnabled) return null;
+    const { allowed, retryAfter } = await limiter.hit(kind, identity);
+    if (allowed) return null;
+    logger.warn('hub.rate_limited', { kind, requestId: c.get('requestId') });
+    c.header('Retry-After', String(retryAfter));
+    return isApi(c.req.path) ? c.json({ error: { code: 'rate_limited', message: 'Too many requests. Try again shortly.' } }, 429) : c.text('Too many requests. Try again shortly.', 429);
+  };
   const app = new Hono();
 
   const contextOf = c => ({
     db, vault, http, operationsEnabled: config.operationsEnabled,
     staff: c.get('staff'), requestId: c.get('requestId')
   });
-  const viewOf = c => ({ staff: c.get('staff'), csrfToken: c.get('csrfToken') });
+  const viewOf = c => ({
+    staff: c.get('staff'), csrfToken: c.get('csrfToken'), sessionId: c.get('sessionId'),
+    unread: c.get('unread'), environment: config.environment
+  });
   const pageConfig = {
     outboundEnabled: config.outboundEnabled,
     credentialStorageEnabled: config.credentials.storageEnabled,
-    operationsEnabled: config.operationsEnabled
+    operationsEnabled: config.operationsEnabled,
+    mfaRequired: Boolean(config.oidc.requiredAmr)
   };
 
   app.use('*', async (c, next) => {
     c.set('requestId', randomBytes(9).toString('base64url'));
+    const started = performance.now();
     await next();
+    // The route pattern only: IDs and query strings stay out of the logs.
+    logger.info('hub.request', {
+      requestId: c.get('requestId'), method: c.req.method, route: c.req.routePath, status: c.res.status,
+      ms: Math.round(performance.now() - started), staffId: c.get('staff')?.id
+    });
     c.header('Content-Security-Policy', CSP);
     c.header('X-Content-Type-Options', 'nosniff');
     // Not no-referrer: that makes browsers send Origin: null on same-origin form
@@ -66,6 +94,7 @@ export function createApp(deps) {
     }
     c.set('staff', resolved.staff);
     c.set('csrfToken', resolved.csrfToken);
+    c.set('sessionId', resolved.sessionId);
 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
       const origin = c.req.header('origin');
@@ -84,6 +113,10 @@ export function createApp(deps) {
         await recordDenied(c, 'csrf.token');
         return denyCsrf(c);
       }
+      const blocked = await limited(c, 'write', resolved.staff.id);
+      if (blocked) return blocked;
+    } else if (!isApi(path)) {
+      c.set('unread', await insights.unreadCount({ db, staff: resolved.staff }));
     }
     return next();
   });
@@ -139,6 +172,8 @@ export function createApp(deps) {
   })));
 
   app.get('/auth/start', async c => {
+    const blocked = await limited(c, 'login', clientKey(c));
+    if (blocked) return blocked;
     try {
       const { redirectUrl, binding } = await auth.beginLogin();
       setCookie(c, config.session.bindingCookieName, binding, { ...cookieOptions, maxAge: 600 });
@@ -150,6 +185,8 @@ export function createApp(deps) {
   });
 
   app.get('/auth/callback', async c => {
+    const blocked = await limited(c, 'login', clientKey(c));
+    if (blocked) return blocked;
     const binding = getCookie(c, config.session.bindingCookieName);
     deleteCookie(c, config.session.bindingCookieName, cookieOptions);
     try {
@@ -171,8 +208,10 @@ export function createApp(deps) {
   app.post('/internal/jobs/run', async c => {
     const header = c.req.header('authorization') ?? '';
     if (!config.jobSecret) return c.notFound();
+    const blocked = await limited(c, 'job', clientKey(c));
+    if (blocked) return blocked;
     if (!safeEqual(header, `Bearer ${config.jobSecret}`)) return c.json({ error: { code: 'unauthenticated' } }, 401);
-    const result = await runJobs({ db, http, stackltr, outboundEnabled: config.outboundEnabled });
+    const result = await runJobs({ db, http, stackltr, email, backupProviders, logger, baseUrl: config.baseUrl, outboundEnabled: config.outboundEnabled });
     return c.json({ ok: true, result });
   });
 
@@ -211,9 +250,26 @@ export function createApp(deps) {
 
   // Clients ------------------------------------------------------------------
 
+  // Live from StackLTR for the person viewing. A failure here never blocks the page,
+  // and nothing read this way is written to the hub's database.
+  const stackltrView = async (c, client) => {
+    if (!stackltr?.enabled) return { enabled: false };
+    const view = { enabled: true, query: c.req.query('stackltr_q') };
+    try {
+      if (client.stackltr_company_id) {
+        view.company = (await stackltr.getCompany(client.stackltr_workspace_id, client.stackltr_company_id))?.company;
+        view.requests = (await stackltr.listRequests(client.stackltr_workspace_id, client.stackltr_company_id))?.requests;
+      }
+      if (view.query && can(c.get('staff'), 'client.write')) view.results = (await stackltr.searchCompanies(view.query.slice(0, 100)))?.companies;
+    } catch (error) {
+      view.error = ERROR_MESSAGES[safeCode(error)] ?? ERROR_MESSAGES.internal_error;
+    }
+    return view;
+  };
+
   const renderClients = async (c, state) => {
     const ctx = contextOf(c);
-    return pages.clientsPage(viewOf(c), { clients: await records.listClients(ctx), plans: await records.listPlans(ctx), notice: noticeOf(c), state });
+    return pages.clientsPage(viewOf(c), { clients: await records.listClients(ctx), plans: await records.listPlans(ctx), planTasks: await inventory.listPlanTasks(ctx), notice: noticeOf(c), state });
   };
   app.get('/clients', async c => c.html(await renderClients(c)));
   app.get('/clients/new', c => {
@@ -223,8 +279,8 @@ export function createApp(deps) {
   const renderClient = async (c, state) => {
     const ctx = contextOf(c);
     const client = await records.getClient(ctx, c.req.param('id'));
-    const websites = (await records.listWebsites(ctx)).filter(site => site.client_account_id === client.id);
-    return pages.clientFormPage(viewOf(c), { client, websites, state, notice: noticeOf(c) });
+    const websites = await records.listWebsites(ctx, { client: client.id, lifecycle: 'all' });
+    return pages.clientFormPage(viewOf(c), { client, websites, state, notice: noticeOf(c), stackltr: await stackltrView(c, client) });
   };
   app.get('/clients/:id', async c => c.html(await renderClient(c)));
   formRoute('/clients', async (ctx, input) => `/clients/${(await records.createClient(ctx, input)).id}`,
@@ -240,15 +296,25 @@ export function createApp(deps) {
 
   // Websites -----------------------------------------------------------------
 
+  const inventoryFiltersOf = c => ({
+    search: c.req.query('q'), client: c.req.query('client'), platform: c.req.query('platform'),
+    hosting: c.req.query('hosting'), monitoring: c.req.query('monitoring'), lifecycle: c.req.query('lifecycle')
+  });
+
   app.get('/websites', async c => {
-    const search = c.req.query('q');
-    return c.html(pages.websitesPage(viewOf(c), { websites: await records.listWebsites(contextOf(c), { search }), search, notice: noticeOf(c) }));
+    const ctx = contextOf(c);
+    const filters = inventoryFiltersOf(c);
+    return c.html(pages.websitesPage(viewOf(c), {
+      websites: await records.listWebsites(ctx, filters), filters, clients: await records.listClients(ctx),
+      hosting: await inventory.listHostingProviders(ctx), notice: noticeOf(c)
+    }));
   });
   const renderWebsiteForm = async (c, state) => {
     const ctx = contextOf(c);
     const id = c.req.param('id');
     return pages.websiteFormPage(viewOf(c), {
       clients: await records.listClients(ctx), plans: await records.listPlans(ctx),
+      hosting: await inventory.listHostingProviders(ctx), owners: await records.listAssignableStaff(ctx),
       website: id ? await records.getWebsite(ctx, id) : undefined, state
     });
   };
@@ -265,10 +331,13 @@ export function createApp(deps) {
     const ctx = contextOf(c);
     const website = await records.getWebsite(ctx, websiteId);
     const id = website.id;
-    const [tasks, schedules, checks, reviews, sources, runs, history, connectionList, operations, assignable] = await Promise.all([
+    const [tasks, schedules, checks, reviews, sources, runs, history, connectionList, operations, assignable, domains, plans, incidents, windows, findings, recovery, workLogs, uptime7, uptime30, uptime90] = await Promise.all([
       records.listTasks(ctx, { websiteId: id }), records.listSchedules(ctx, { websiteId: id }), records.listChecks(ctx, { websiteId: id }),
       records.listSecurityReviews(ctx, { websiteId: id }), records.listBackupSources(ctx, { websiteId: id }), records.listBackupRuns(ctx, id),
-      records.listHistory(ctx, id), connections.listConnections(ctx, id), connections.listOperations(ctx, id), records.listAssignableStaff(ctx)
+      records.listHistory(ctx, id), connections.listConnections(ctx, id), connections.listOperations(ctx, id), records.listAssignableStaff(ctx),
+      inventory.listDomains(ctx, id), records.listPlans(ctx), insights.listIncidents(ctx, { websiteId: id }), insights.listMaintenanceWindows(ctx, id),
+      insights.listFindings(ctx, { websiteId: id }), insights.listRecoveryRequests(ctx, id), records.listWorkLogs(ctx, id),
+      insights.uptimeReport(ctx, { websiteId: id, days: 7 }), insights.uptimeReport(ctx, { websiteId: id, days: 30 }), insights.uptimeReport(ctx, { websiteId: id, days: 90 })
     ]);
     const credentials = {};
     if (can(ctx.staff, 'credential.write')) {
@@ -276,7 +345,7 @@ export function createApp(deps) {
     }
     return pages.websiteDetailPage(viewOf(c), {
       website, tasks, schedules, checks, reviews, sources, runs, history, connections: connectionList, operations, credentials, assignable,
-      config: pageConfig, state, notice: noticeOf(c)
+      config: pageConfig, state, notice: noticeOf(c), domains, plans, incidents, windows, findings, recovery, workLogs, uptime: [uptime7, uptime30, uptime90]
     });
   };
   const renderWebsite = (c, state) => renderWebsiteById(c, c.req.param('id'), state);
@@ -286,6 +355,16 @@ export function createApp(deps) {
     await records.updateWebsite(ctx, c.req.param('id'), input);
     return `/websites/${c.req.param('id')}`;
   }, renderWebsiteForm);
+
+  const websiteAction = (path, action) => formRoute(path, async (ctx, input, c) => {
+    await action(ctx, c.req.param('id'), input);
+    return `/websites/${c.req.param('id')}`;
+  }, renderWebsite);
+  websiteAction('/websites/:id/archive', (ctx, id) => inventory.archiveWebsite(ctx, id));
+  websiteAction('/websites/:id/restore', (ctx, id) => inventory.restoreWebsite(ctx, id));
+  websiteAction('/websites/:id/cms-version', (ctx, id, input) => inventory.recordCmsVersion(ctx, id, input));
+  websiteAction('/websites/:id/domains', (ctx, id, input) => inventory.addDomain(ctx, id, input));
+  websiteAction('/websites/:id/apply-plan', (ctx, id, input) => inventory.applyPlanToWebsite(ctx, id, input));
 
   // Re-render the website page when the form that failed came from one.
   const renderFromReturn = fallback => async (c, state) => {
@@ -319,6 +398,7 @@ export function createApp(deps) {
     return c.redirect(`/websites/${await websiteOfConnection(ctx, id)}?notice=${success}#connection`, 303);
   });
   connectionRoute('/connections/:id/check', (ctx, id) => connections.runConnectionCheck(ctx, id), 'check_done');
+  connectionRoute('/connections/:id/test', (ctx, id) => connections.runConnectionCheck(ctx, id, { mode: 'test' }), 'check_done');
   connectionRoute('/connections/:id/credential', (ctx, id, input) => connections.storeCredential(ctx, id, input), 'credential_stored');
   connectionRoute('/connections/:id/credential/revoke', (ctx, id) => connections.revokeCredential(ctx, id), 'credential_revoked');
 
@@ -366,6 +446,14 @@ export function createApp(deps) {
     await records.completeTask(ctx, c.req.param('id'), input);
     return '/maintenance';
   }, renderFromReturn(renderMaintenance));
+  formRoute('/maintenance/tasks/:id/approve', async (ctx, _input, c) => {
+    await records.approveTask(ctx, c.req.param('id'));
+    return '/maintenance';
+  }, renderFromReturn(renderMaintenance));
+  formRoute('/maintenance/tasks/:id/worklog', async (ctx, input, c) => {
+    await records.addWorkLog(ctx, c.req.param('id'), input);
+    return '/maintenance';
+  }, renderFromReturn(renderMaintenance));
   formRoute('/maintenance/schedules', async (ctx, input) => {
     await records.createSchedule(ctx, input);
     return '/maintenance';
@@ -381,11 +469,18 @@ export function createApp(deps) {
 
   // Monitoring, security, backups ---------------------------------------------
 
-  app.get('/monitoring', async c => c.html(pages.monitoringPage(viewOf(c), { checks: await records.listChecks(contextOf(c)), config: pageConfig })));
-  app.get('/security', async c => c.html(pages.securityPage(viewOf(c), { reviews: await records.listSecurityReviews(contextOf(c)) })));
+  const renderMonitoring = async c => {
+    const ctx = contextOf(c);
+    const checks = await records.listChecks(ctx);
+    return pages2.monitoringDashboardPage(viewOf(c), { checks, incidents: await insights.listIncidents(ctx), config: pageConfig, table: pages.checkTable(checks, true) });
+  };
+  const renderSecurity = async c => {
+    const ctx = contextOf(c);
+    return pages2.securityDashboardPage(viewOf(c), { sites: await insights.securityDashboard(ctx), findings: await insights.listFindings(ctx) });
+  };
+  app.get('/monitoring', async c => c.html(await renderMonitoring(c)));
+  app.get('/security', async c => c.html(await renderSecurity(c)));
   app.get('/backups', async c => c.html(pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)) })));
-  const renderMonitoring = async c => pages.monitoringPage(viewOf(c), { checks: await records.listChecks(contextOf(c)), config: pageConfig });
-  const renderSecurity = async c => pages.securityPage(viewOf(c), { reviews: await records.listSecurityReviews(contextOf(c)) });
   const renderBackups = async c => pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)) });
   formRoute('/monitoring/checks', async (ctx, input) => {
     await records.createCheck(ctx, input);
@@ -407,6 +502,74 @@ export function createApp(deps) {
     await records.recordRestoreVerification(ctx, input);
     return '/backups';
   }, renderFromReturn(renderBackups));
+
+  formRoute('/monitoring/windows', async (ctx, input) => {
+    await insights.createMaintenanceWindow(ctx, input);
+    return '/monitoring';
+  }, renderFromReturn(renderMonitoring));
+  formRoute('/incidents/:id/acknowledge', async (ctx, _input, c) => {
+    const row = await insights.acknowledgeIncident(ctx, c.req.param('id'));
+    return `/websites/${row.website_id}`;
+  }, renderMonitoring);
+  formRoute('/security/findings', async (ctx, input) => {
+    await insights.createFinding(ctx, input);
+    return '/security';
+  }, renderFromReturn(renderSecurity));
+  formRoute('/security/findings/:id/update', async (ctx, input, c) => {
+    await insights.updateFinding(ctx, c.req.param('id'), input);
+    return '/security';
+  }, renderSecurity);
+  formRoute('/security/findings/:id/remediate', async (ctx, _input, c) => {
+    await insights.createRemediationTask(ctx, c.req.param('id'));
+    return '/security';
+  }, renderSecurity);
+  formRoute('/recovery', async (ctx, input) => `/websites/${(await insights.requestRecovery(ctx, input)).website_id}`, renderBackups);
+  for (const action of ['approve', 'reject', 'start', 'close']) {
+    formRoute(`/recovery/:id/${action}`, async (ctx, input, c) => `/websites/${(await insights.moveRecovery(ctx, c.req.param('id'), action, input)).website_id}`, renderBackups);
+  }
+
+  // Plans, hosting, reports, notifications, account ---------------------------
+
+  formRoute('/plans/:id/tasks', async (ctx, input, c) => {
+    await inventory.addPlanTask(ctx, c.req.param('id'), input);
+    return '/clients';
+  }, renderClients);
+
+  const renderHosting = async (c, state) => pages2.hostingPage(viewOf(c), { providers: await inventory.listHostingProviders(contextOf(c)), state, notice: noticeOf(c) });
+  app.get('/hosting', async c => c.html(await renderHosting(c)));
+  formRoute('/hosting', async (ctx, input) => {
+    await inventory.createHostingProvider(ctx, input);
+    return '/hosting';
+  }, renderHosting);
+
+  app.get('/reports/maintenance', async c => {
+    const ctx = contextOf(c);
+    const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;
+    const report = await inventory.maintenanceReport(ctx, {
+      clientId: c.req.query('client'), from: c.req.query('from') || monthStart, to: c.req.query('to') || new Date().toISOString().slice(0, 10)
+    });
+    if (c.req.query('format') === 'csv') {
+      c.header('Content-Type', 'text/csv; charset=utf-8');
+      c.header('Content-Disposition', 'attachment; filename="maintenance-report.csv"');
+      return c.body(pages2.toCsv([
+        ['Completed', 'Client', 'Website', 'Work', 'Type', 'Notes', 'By', 'Minutes', 'Evidence'],
+        ...report.tasks.map(item => [item.completed_at, item.client_name, item.website_name, item.title, item.kind, item.completion_notes, item.completed_by_name, item.minutes, item.completion_evidence_ref])
+      ]));
+    }
+    return c.html(pages2.reportPage(viewOf(c), { report, clients: await records.listClients(ctx) }));
+  });
+
+  app.get('/notifications', async c => c.html(pages2.notificationsPage(viewOf(c), { notifications: await insights.listNotifications(contextOf(c)) })));
+  app.post('/notifications/read', async c => {
+    await insights.markNotificationsRead(contextOf(c));
+    return c.redirect('/notifications', 303);
+  });
+
+  app.get('/account', async c => c.html(pages2.accountPage(viewOf(c), { sessions: await insights.listOwnSessions(contextOf(c)), config: pageConfig, notice: noticeOf(c) })));
+  app.post('/account/sessions/:id/revoke', async c => {
+    await insights.revokeOwnSession(contextOf(c), c.req.param('id'));
+    return c.redirect('/account?notice=saved', 303);
+  });
 
   // Integrations, staff, audit ------------------------------------------------
 
@@ -448,7 +611,25 @@ export function createApp(deps) {
   };
 
   app.get('/api/v1/me', c => c.json({ staff: c.get('staff'), csrf_token: c.get('csrfToken') }));
-  app.get('/api/v1/websites', async c => c.json({ websites: await records.listWebsites(contextOf(c), { search: c.req.query('q') }) }));
+  app.get('/api/v1/websites', async c => c.json({ websites: await records.listWebsites(contextOf(c), inventoryFiltersOf(c)) }));
+  app.get('/api/v1/clients', async c => c.json({ clients: await records.listClients(contextOf(c)) }));
+  app.post('/api/v1/clients', async c => c.json(await records.createClient(contextOf(c), await jsonBody(c)), 201));
+  app.get('/api/v1/tasks', async c => c.json({ tasks: await records.listTasks(contextOf(c), { scope: c.req.query('scope') === 'all' ? 'all' : 'open' }) }));
+  app.post('/api/v1/tasks/:id/complete', async c => c.json(await records.completeTask(contextOf(c), c.req.param('id'), await jsonBody(c))));
+  app.get('/api/v1/monitoring/checks', async c => c.json({ checks: await records.listChecks(contextOf(c)) }));
+  app.get('/api/v1/monitoring/incidents', async c => c.json({ incidents: await insights.listIncidents(contextOf(c)) }));
+  app.get('/api/v1/security/findings', async c => c.json({ findings: await insights.listFindings(contextOf(c)) }));
+  app.get('/api/v1/security/websites', async c => c.json({ websites: await insights.securityDashboard(contextOf(c)) }));
+  app.get('/api/v1/backups/sources', async c => c.json({ sources: await records.listBackupSources(contextOf(c)) }));
+  app.get('/api/v1/notifications', async c => c.json({ notifications: await insights.listNotifications(contextOf(c)) }));
+  app.get('/api/v1/hosting-providers', async c => c.json({ providers: await inventory.listHostingProviders(contextOf(c)) }));
+  app.post('/api/v1/websites/:id/archive', async c => c.json(await inventory.archiveWebsite(contextOf(c), c.req.param('id'))));
+  app.post('/api/v1/websites/:id/domains', async c => c.json(await inventory.addDomain(contextOf(c), c.req.param('id'), await jsonBody(c)), 201));
+  app.get('/api/v1/websites/:id/domains', async c => {
+    const ctx = contextOf(c);
+    const website = await records.getWebsite(ctx, c.req.param('id'));
+    return c.json({ domains: await inventory.listDomains(ctx, website.id) });
+  });
   app.post('/api/v1/websites', async c => c.json(await records.createWebsite(contextOf(c), await jsonBody(c)), 201));
   app.get('/api/v1/websites/:id', async c => c.json({ website: await records.getWebsite(contextOf(c), c.req.param('id')) }));
   app.get('/api/v1/websites/:id/connections', async c => {

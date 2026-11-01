@@ -16,13 +16,17 @@ const NAV = [
   ['/monitoring', 'Monitoring', 'monitoring.read'],
   ['/security', 'Security', 'security.read'],
   ['/backups', 'Backups', 'backup.read'],
+  ['/hosting', 'Hosting providers', 'website.read'],
   ['/integrations', 'Integrations', 'website.read'],
   ['/staff', 'Staff', 'staff.read'],
   ['/audit', 'Audit log', 'audit.read']
 ];
 
+// Only the two ends of the release path look different, so nobody mistakes one for production.
+const ENVIRONMENT_NOTE = { staging: 'Staging environment', development: 'Local development', test: 'Test environment' };
+
 export function shell({ title, active, view, body, notice, actions }) {
-  const { staff, csrfToken } = view;
+  const { staff, csrfToken, unread = 0, environment } = view;
   return html`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive"><title>${title} | CrumByte Hub</title>
@@ -33,11 +37,14 @@ export function shell({ title, active, view, body, notice, actions }) {
   <div><p class="nav-label">Workspace</p><nav class="nav" aria-label="Sections">
     ${NAV.filter(item => can(staff, item[2])).map(([href, label]) =>
       html`<a href="${href}" ${href === active ? raw('aria-current="page"') : ''}>${label}</a>`)}
+    <a href="/notifications" ${active === '/notifications' ? raw('aria-current="page"') : ''}>Notifications${unread ? html` <span class="tag warn">${unread}<span class="skip"> unread</span></span>` : ''}</a>
+    <a href="/account" ${active === '/account' ? raw('aria-current="page"') : ''}>Your account</a>
   </nav></div>
   <div class="who"><div><strong>${staff.display_name}</strong>${roleLabel(staff.role)}</div>
     <form method="post" action="/logout">${csrf(csrfToken)}<button class="btn quiet" type="submit">Sign out</button></form></div>
 </aside>
 <main id="main">
+  ${ENVIRONMENT_NOTE[environment] ? html`<div class="banner warn" role="note"><strong>${ENVIRONMENT_NOTE[environment]}</strong></div>` : ''}
   <header class="topbar"><div><div class="eyebrow">CrumByte Technologies / Internal</div><h1>${title}</h1></div>
     ${actions ? html`<div>${actions}</div>` : ''}</header>
   ${notice ? html`<div class="banner ${notice.kind ?? ''}" role="status"><strong>${notice.title}</strong>${notice.text ?? ''}</div>` : ''}
@@ -49,6 +56,10 @@ export function shell({ title, active, view, body, notice, actions }) {
 export const roleLabel = role => ({ owner: 'Owner', admin: 'Admin', technician: 'Technician', billing: 'Billing', viewer: 'Viewer' }[role] ?? role);
 
 export const csrf = token => html`<input type="hidden" name="_csrf" value="${token}">`;
+export const postForm = (action, view, content, klass = 'stack') => html`<form class="${klass}" method="post" action="${action}">${csrf(view.csrfToken)}${content}</form>`;
+export const submit = (label, klass = 'btn') => html`<div><button class="${klass}" type="submit">${label}</button></div>`;
+export const stateBanner = state => (state?.errors
+  ? html`<div class="banner error" role="alert"><strong>${state.message ?? 'That could not be saved.'}</strong>${Object.values(state.errors).join(' ')}</div>` : '');
 
 export function barePage({ title, body }) {
   return html`<!doctype html>

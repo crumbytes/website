@@ -1,11 +1,11 @@
-import { expectArray, expectObject, section, SUPPORT } from './framework.js';
+import { defineAdapter, expectArray, expectObject, SUPPORT } from './framework.js';
 
 const BASE_URL = 'https://www.wixapis.com';
 // Limited to operational fields. The same endpoint can return business contact
 // details, which belong in StackLTR and are not requested here.
 const PROPERTY_FIELDS = ['siteDisplayName', 'timeZone', 'language', 'paymentCurrency', 'businessConfig'];
 
-export const wix = {
+export const wix = defineAdapter({
   key: 'wix',
   label: 'Wix',
   docsUrl: 'https://dev.wix.com/docs/api-reference',
@@ -35,19 +35,19 @@ export const wix = {
   authHeaders(secret) {
     return { Authorization: secret.api_key };
   },
-  async check(client, { settings }) {
+  sections(client, { settings }) {
     const sections = {
-      connection: await section(async () => {
+      connection: async () => {
         const result = expectObject(await client.get('/site-properties/v4/properties', {
           query: { 'fields.paths': PROPERTY_FIELDS },
           headers: { 'wix-site-id': settings.site_id }
         }));
         return Object.fromEntries(PROPERTY_FIELDS.map(field => [field, result.properties?.[field] ?? null]));
-      })
+      }
     };
     // Wix allows one scope header per call, so this one sends only the account ID.
     if (settings.account_id) {
-      sections.site_inventory = await section(async () => {
+      sections.site_inventory = async () => {
         const result = expectObject(await client.post('/site-list/v2/sites/query', {
           headers: { 'wix-account-id': settings.account_id },
           json: { query: { filter: { id: { $eq: settings.site_id } }, cursorPaging: { limit: 1 } } }
@@ -56,8 +56,8 @@ export const wix = {
           id: site.id, displayName: site.displayName, published: site.published, premium: site.premium,
           domainConnected: site.domainConnected, blocked: site.blocked, viewUrl: site.viewUrl
         }));
-      });
+      };
     }
     return sections;
   }
-};
+});

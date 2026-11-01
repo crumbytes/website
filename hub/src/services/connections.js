@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getAdapter } from '../adapters/index.js';
-import { createPlatformClient, safeCode, summarizeSections } from '../adapters/framework.js';
+import { AdapterError, createPlatformClient, safeCode, summarizeSections } from '../adapters/framework.js';
 import { auditStaff, writeAudit } from '../audit.js';
 import { requirePermission } from '../authz.js';
 import { one } from '../db.js';
@@ -12,7 +12,7 @@ const TIMEOUT_MS = 12000;
 
 // Safe columns only. No code path selects credential material for a page or API.
 const CONNECTION_COLUMNS = `c.id, c.website_id, c.client_account_id, c.adapter_key, c.base_url, c.auth_type, c.settings,
-  c.status, c.granted_permissions, c.last_checked_at, c.last_error_code, c.created_at`;
+  c.status, c.granted_permissions, c.last_checked_at, c.last_error_code, c.not_before, c.created_at`;
 
 export async function listConnections(ctx, websiteId) {
   requirePermission(ctx.staff, 'connection.read');
@@ -147,7 +147,7 @@ async function authorizedClient(ctx, connection, adapter, purpose) {
 
 // Asks the platform what it can report. A failure is recorded as a failure with a
 // safe code. It never becomes a healthy or unhealthy claim about the website.
-export async function runConnectionCheck(ctx, connectionId) {
+export async function runConnectionCheck(ctx, connectionId, { mode = 'full' } = {}) {
   requirePermission(ctx.staff, 'connection.check');
   const connection = await asStaff(ctx, tx => visibleConnection(tx, connectionId));
   const adapter = getAdapter(connection.adapter_key);
@@ -155,12 +155,14 @@ export async function runConnectionCheck(ctx, connectionId) {
   let code;
   let sections = {};
   try {
+    // Honour a platform's request to wait, rather than be blocked or banned.
+    if (connection.not_before && new Date(connection.not_before) > new Date()) throw new AdapterError('backing_off');
     const prepared = await authorizedClient(ctx, connection, adapter, 'connection_check');
     if (prepared.code) {
       outcome = 'failed';
       code = prepared.code;
     } else {
-      sections = await adapter.check(prepared.client, { settings: connection.settings });
+      sections = await (mode === 'test' ? adapter.testConnection : adapter.check)(prepared.client, { settings: connection.settings });
       ({ outcome, code } = summarizeSections(sections));
     }
   } catch (error) {
@@ -175,12 +177,20 @@ export async function runConnectionCheck(ctx, connectionId) {
       [connection.client_account_id, connection.id, outcome, code, JSON.stringify(sections), ctx.staff.id]);
     await tx.query(
       `update hub.platform_connections set status = $2, last_checked_at = now(), last_error_code = $3, updated_at = now(),
-         granted_permissions = coalesce($4::jsonb, granted_permissions) where id = $1`,
-      [connection.id, status, code, sections.granted_scopes?.status === 'ok' ? JSON.stringify(sections.granted_scopes.data) : null]);
+         granted_permissions = coalesce($4::jsonb, granted_permissions),
+         not_before = case when $5::int is not null then now() + make_interval(secs => $5::int) else not_before end where id = $1`,
+      [connection.id, status, code, sections.granted_scopes?.status === 'ok' ? JSON.stringify(sections.granted_scopes.data) : null,
+        Object.values(sections).find(item => item.retryAfterSeconds)?.retryAfterSeconds ?? null]);
+    // Only a version the platform itself reported is labelled as coming from the API.
+    const reported = sections.extension_inventory?.data?.core_version;
+    if (reported) {
+      await tx.query(
+        `update hub.managed_websites set cms_version = $2, cms_version_source = 'api', cms_version_recorded_at = now() where id = $1`, [connection.website_id, reported]);
+    }
     await writeAudit(tx, {
       staffId: ctx.staff.id, requestId: ctx.requestId, action: 'connection.check', outcome: outcome === 'failed' ? 'failure' : 'success',
       entityType: 'platform_connection', entityId: connection.id, clientId: connection.client_account_id,
-      metadata: { adapter: adapter.key, outcome, code }
+      metadata: { adapter: adapter.key, mode, outcome, code }
     });
   });
   return { outcome, code, sections };
