@@ -1,0 +1,32 @@
+name: Website Hub
+
+on:
+  pull_request:
+    paths:
+      - 'hub/**'
+      - '.github/workflows/hub.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'hub/**'
+      - '.github/workflows/hub.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: hub/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm test
