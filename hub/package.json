@@ -1,0 +1,24 @@
+{
+  "name": "crumbyte-website-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal platform for managing CrumByte client websites",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test --test-concurrency=4 \"tests/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.16",
+    "jose": "^6.2.14",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.16"
+  }
+}
