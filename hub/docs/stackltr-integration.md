@@ -59,18 +59,26 @@ Idempotency-Key: maintenance.completed:<task id>
 }
 ```
 
-Later, read-only lookups so staff can pick a company or request instead of pasting an ID:
+Reads, shown live to the person asking and never stored in the hub. The hub client and the client page already use the first three:
 
 ```
-GET /api/integrations/website-hub/v1/companies?query=
-GET /api/integrations/website-hub/v1/requests?company_id=
+GET  /api/integrations/website-hub/v1/companies?query=
+     -> { "companies": [{ "id", "workspace_id", "name", "domain" }] }
+GET  /api/integrations/website-hub/v1/workspaces/:workspace/companies/:company
+     -> { "company": { "name", "domain", "lifecycle" } }
+GET  /api/integrations/website-hub/v1/workspaces/:workspace/companies/:company/requests
+     -> { "requests": [{ "id", "title", "status" }] }
+POST /api/integrations/website-hub/v1/workspaces/:workspace/companies/:company/requests
+     Idempotency-Key required. Creates a service request. The client method exists, with no interface yet.
 ```
+
+Billing stays a reference: `stackltr_billing_ref` on the client and plan. The hub does not read invoice amounts.
 
 StackLTR must verify that the company and request belong to the workspace on the credential, and write an event through its existing RPC rules. Customer-visible messages must follow StackLTR's rule of keeping infrastructure details out, so the event sends a title rather than technical detail.
 
 ## Linking today
 
-Without the API, an admin can paste the StackLTR workspace and company IDs on the client form. The hub cannot verify them, so a link only records what was typed. The lookup endpoints replace this.
+Without the API, an admin can paste the StackLTR workspace and company IDs on the client form. The hub cannot verify them, so a link only records what was typed. When integration is on, the client page searches StackLTR and shows the IDs to use.
 
 ## Open decisions for the owner and StackLTR's release owner
 

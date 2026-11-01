@@ -1,6 +1,6 @@
 # CrumByte Website Management Hub
 
-Internal staff platform for managing customer websites. **Development foundation: not deployed, and never connected to a live site, hosted database or StackLTR.**
+Internal staff platform for managing customer websites. **Built and tested locally. Not deployed, and never connected to a live site, hosted database or StackLTR.**
 
 - [Architecture](docs/architecture.md)
 - [Security design](docs/security.md)
@@ -8,6 +8,12 @@ Internal staff platform for managing customer websites. **Development foundation
 - [StackLTR integration design](docs/stackltr-integration.md)
 - [Restore verification procedure](docs/restore-verification.md)
 - [Remaining requirements](docs/remaining-requirements.md)
+- [Final acceptance status](docs/acceptance.md)
+- [Deployment and environments](docs/deployment.md)
+- [Operations runbook](docs/operations.md)
+- [Customer recovery runbook](docs/recovery-runbook.md)
+- [API contract for frontend work](docs/api-contract.md)
+- [Test and failure log](docs/test-log.md)
 
 ## Run locally
 
@@ -28,6 +34,14 @@ npm test
 
 Tests run on real PostgreSQL through PGlite, with row level security enforced, and contact no external service.
 
+Browser tests start the local server themselves. They need a browser: either `npx playwright install chromium`, or an installed Chrome with `PLAYWRIGHT_CHANNEL=chrome`.
+
+```bash
+npm run test:e2e
+```
+
+CI also runs `scripts/pg-integration.mjs` on a throwaway PostgreSQL 17 server, as a non-superuser owner.
+
 ## Safety switches
 
 All of these default to off. See [.env.example](.env.example).
@@ -37,6 +51,8 @@ All of these default to off. See [.env.example](.env.example).
 | `HUB_OUTBOUND_ENABLED` | Any request to a staff-supplied address, including monitoring |
 | `HUB_CREDENTIAL_STORAGE_ENABLED` | Storing and decrypting platform credentials |
 | `HUB_OPERATIONS_ENABLED` | Running approved changes on customer sites |
-| `HUB_STACKLTR_ENABLED` | Sending events to StackLTR |
+| `HUB_STACKLTR_ENABLED` | Reading from and sending events to StackLTR |
+| `HUB_EMAIL_ENABLED` | Alert emails |
+| `HUB_R2_ENABLED` | Reading the Cloudflare R2 backup listing |
 
 Do not put real customer credentials in any development environment.

@@ -1,6 +1,6 @@
 # Website Management Hub: security design
 
-Status: implemented and tested locally against in-process PostgreSQL. It has **not** had an independent security review, and has never run on hosted infrastructure.
+Status: implemented and tested locally and in CI, on in-process PostgreSQL and a throwaway PostgreSQL 17 server. It has **not** had an independent security review, and has never run on hosted infrastructure.
 
 ## Authentication
 
@@ -73,6 +73,14 @@ Staff supply URLs, so every outbound request goes through `safe-http.js`:
 - `no-store` on all staff responses, `noindex` throughout, HSTS outside development. Return paths are restricted to same-site paths.
 - Errors show a generic message and a reference. Logs carry the error type and code only, because database messages can contain values.
 
+## Rate limiting
+
+Counters live in the database, because serverless instances share nothing. Keys are hashed, so no address is stored. Sign-in allows 30 requests per address in 5 minutes, writes allow 120 per person per minute, and the jobs route allows 12 per minute. Addresses come only from `HUB_TRUSTED_IP_HEADER`, which is required outside development, because a client could forge any other header.
+
+## Logging
+
+Structured JSON lines with a request ID, route pattern, status and duration. Request bodies, query strings and record IDs in paths stay out. Fields pass through the same redactor as the audit log.
+
 ## Audit logging
 
 - `audit_log` receives an entry for sign-ins and denials, every change, every credential use, connection checks, operations, and refused requests.
@@ -84,8 +92,8 @@ Staff supply URLs, so every outbound request goes through `safe-http.js`:
 ## Known gaps
 
 1. No independent security review or penetration test.
-2. Sign-in has no rate limiting of its own. It relies on the identity provider and on Vercel Firewall rules that are not configured yet.
-3. Audit log export and retention are not built.
-4. The key-encryption key is an environment variable until a KMS is chosen.
-5. Re-wrapping credentials after key rotation is not built.
+2. Audit log export and retention are not built.
+3. The key-encryption key is an environment variable until a KMS is chosen.
+4. Re-wrapping credentials after key rotation is not built.
+5. Rate limits are a fixed window in the database, which is enough to stop abuse but not a defence against a distributed attack. Vercel Firewall rules are not configured.
 6. The repository is **public**. No secrets are stored in it, but the schema and code are readable by anyone, so consider a private repository.

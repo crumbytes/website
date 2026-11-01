@@ -24,7 +24,8 @@ Auth: Application Passwords over HTTPS, for a dedicated service user.
 | Plugin inventory and versions | Added permission | `GET /wp/v2/plugins`. Needs `activate_plugins`. |
 | Theme inventory and versions | Added permission | `GET /wp/v2/themes` |
 | Activate or deactivate a plugin | Added permission, with hub approval | `POST /wp/v2/plugins/<plugin>` |
-| Core version | **Manual** | Core REST routes do not report it. |
+| Update availability | **Manual** | Core REST routes report installed versions, not whether an update exists. |
+| Core version | **Manual** | Core REST routes do not report it. Staff can record it, and it is labelled as such. |
 | Core, plugin and theme updates | **Manual** | Core REST can install and activate, not update. |
 | Backups | **Manual** | No core API. Use a backup provider. |
 
@@ -87,7 +88,7 @@ No adapter. Uptime and certificate monitoring, maintenance, security reviews and
 
 ## Adding a platform
 
-Create one module in `src/adapters/` and add it to the list in `index.js`. It declares:
+Create one module in `src/adapters/` wrapped in `defineAdapter`, and add it to the list in `index.js`. It declares:
 
 ```js
 {
@@ -100,12 +101,14 @@ Create one module in `src/adapters/` and add it to the list in `index.js`. It de
   validateConnection(baseUrl, settings),
   authHeaders(secret, settings),
   prepareAuth(secret, options),   // Optional, for token exchange.
-  check(client, { settings }),    // Returns sections built with section().
+  sections(client, { settings }), // Named async checks. 'connection' is the connection test.
   runOperation(client, key, params) // Required if there are operations.
 }
 ```
 
 Also add the platform's key to the `adapter_key` and `cms_platform` checks in a new migration. `tests/adapters.test.mjs` verifies the contract for every registered adapter, including that anything needing added permission names what it needs.
+
+A connection test runs only the `connection` section. If a platform answers 429 with `Retry-After`, the hub waits that long before contacting it again for that connection.
 
 Failures from any platform become one of the safe codes in `framework.js`. Provider bodies and headers are dropped, because they can echo credentials or customer data. One failed section does not hide the others, and a denied section shows as needing permission, never as a pass.
 

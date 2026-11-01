@@ -1,6 +1,6 @@
 # Website Management Hub: architecture
 
-Status: development foundation. **Not deployed.** Nothing here has connected to a live customer site, a hosted database or StackLTR. See [remaining-requirements.md](remaining-requirements.md) for what stands between this and production.
+Status: built and tested locally. **Not deployed.** Nothing here has connected to a live customer site, a hosted database or StackLTR. See [acceptance.md](acceptance.md) for exact status and [deployment.md](deployment.md) for the environment plan.
 
 ## What it is
 
@@ -13,7 +13,7 @@ An internal CrumByte staff tool for managing customer websites on WordPress, Sho
 | Where it lives | Self-contained `hub/` package in `crumbytes/website` | Keeps PR #2's hub work together, with no effect on the public site. `.vercelignore` keeps `hub/` out of the public deployment. |
 | Hosting | A **separate** Vercel project with root directory `hub/`, on its own hostname | The public site serves every repo file as a static asset: `https://crumbyte.com/infra/remote-support/schema.sql` returned 200 on 2026-11-01. An internal app must not share that deployment or origin. |
 | Runtime | Node 24, [Hono](https://hono.dev), plain ES modules, no build step | Matches the repo's plain JavaScript and `node:test`. A small route surface is easy to review. |
-| Interface | Server-rendered HTML forms with **no client JavaScript** | Client credentials cannot reach browser code if there is no browser code. Allows a CSP of `default-src 'none'`. |
+| Interface | Server-rendered HTML forms with **no client JavaScript** | Client credentials cannot reach browser code if there is no browser code. Allows a CSP of `default-src 'none'`. The brief recommends React/Next.js, so this is a deviation for the owner to accept or change. See [acceptance.md](acceptance.md). |
 | Staff sign-in | OpenID Connect with PKCE against an identity provider | The hub stores no staff passwords, and MFA is enforced at the provider. The provider is the owner's choice. |
 | Sessions | Random token in a `__Host-` cookie, stored as a SHA-256 hash | 30-minute idle and 8-hour absolute limits, server-side revocation. Role changes and disabling apply on the next request. |
 | Database | PostgreSQL, in schema `hub`, with row level security | Same engine family as StackLTR. Forward-only migrations in `db/migrations`, currently **proposals**. |
@@ -68,9 +68,14 @@ Migration: [0001_foundation.sql](../db/migrations/0001_foundation.sql). Access r
 | Clients | `client_accounts`, `staff_client_assignments`, `service_plans` | A client is a name and StackLTR references, with no contact details. |
 | Websites | `managed_websites` | URL, CMS, hosting provider, plan, lifecycle. |
 | Platforms | `platform_connections`, `connection_credentials`, `platform_snapshots`, `operation_requests` | Credentials are in their own table, with different grants. |
-| Maintenance | `maintenance_schedules`, `maintenance_tasks`, `service_history` | History is append-only. |
-| Monitoring | `monitoring_checks`, `monitoring_results`, `security_reviews` | Results are append-only, and no row means unknown. |
-| Backups | `backup_sources`, `backup_runs`, `restore_verifications` | Restore evidence is append-only and constrained. |
+| Reference | `website_platforms`, `hosting_providers` | Platforms are seeded. Providers start empty. |
+| Domains | `website_domains` | Expiry records whether staff or a registry supplied it. |
+| Maintenance | `service_plans`, `plan_tasks`, `maintenance_schedules`, `maintenance_tasks`, `task_work_logs`, `service_history` | History and work logs are append-only. Software and plugin updates need a second person's approval. |
+| Monitoring | `monitoring_checks`, `monitoring_results`, `incidents`, `maintenance_windows` | Results are append-only, and no row means unknown. |
+| Security | `security_reviews`, `security_findings` | Each finding says whether a check or a person made it. Staff cannot forge the automated label. |
+| Backups | `backup_sources`, `backup_runs`, `restore_verifications`, `recovery_requests` | Restore evidence is append-only and constrained. Recoveries need two people. |
+| Notifications | `notifications` | One per person per event. Email delivery is optional. |
+| Protection | `rate_limits` | Hashed keys, no addresses. |
 | Integration | `stackltr_outbox` | Events wait here if StackLTR is unavailable. |
 | Audit | `audit_log` | Append-only hash chain. |
 
@@ -88,4 +93,8 @@ These are product rules, enforced in code and covered by tests:
 
 ## Scheduling
 
-`POST /internal/jobs/run` with a bearer secret runs due monitoring checks and StackLTR delivery. It does nothing unless `HUB_OUTBOUND_ENABLED` is on. Picking a scheduler is an open decision, because Vercel Hobby cron is limited to daily runs, which is too coarse for uptime checks. Reminders are computed from the records and shown on the Overview page. **No reminder emails are sent yet.**
+`POST /internal/jobs/run` with a bearer secret runs due monitoring, domain expiry, backup listing, reminders, StackLTR delivery and email. Each step fails on its own. Probes and outbound steps do nothing unless their switches are on. Picking a scheduler is an open decision, because Vercel Hobby cron is limited to daily runs, which is too coarse for uptime checks. Alert email is built and off by default.
+
+## Monitoring logic
+
+A result is written only after a probe ran. An incident opens after the configured number of consecutive failures, resolves on the next success, and notifies owners, admins and technicians assigned to that client. Failures inside a maintenance window are recorded and flagged, open nothing, and do not count against uptime.
