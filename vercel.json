@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "feat/website-hub-foundation-20261101": false
+    }
+  },
   "cleanUrls": true,
   "trailingSlash": false,
   "redirects": [

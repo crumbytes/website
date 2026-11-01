@@ -2,6 +2,8 @@
 
 Official website for crumbyte.com. Vercel hosting; Cloudflare DNS.
 
+`hub/` is the separate internal Website Management Hub. It is excluded from this site's deployment by `.vercelignore`; see [hub/README.md](hub/README.md).
+
 Contact and support forms submit to `/api/contact`, which delivers through Resend. Production Vercel configuration supplies `RESEND_API_KEY` (sensitive, domain-restricted sending access) and `CONTACT_FROM_EMAIL` (`CrumByte Technologies <website@crumbyte.com>`). Never commit API keys. Notifications go only to `info@crumbyte.com`, with the visitor's email as Reply-To. The sender is a transactional identity, not a new mailbox; incoming mailbox routing is maintained separately.
 
 Run `node --test tests/contact.test.mjs` to check email validation, HTML escaping, fixed recipients, support details, idempotent retries, and failure handling without sending email. The browser creates a request ID and reuses it after a failed submission; the server uses a Resend idempotency key to avoid duplicate emails. Both forms have honeypots and field limits. No automatic email is sent to a visitor, and no visitor data is added to marketing lists. For higher-volume abuse, add a server-verified challenge or persistent rate limiter.

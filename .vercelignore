@@ -1,0 +1,4 @@
+# The Website Management Hub is an internal application with its own Vercel
+# project. Its source must never be served from the public marketing site.
+hub/
+.github/
