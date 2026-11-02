@@ -1,5 +1,7 @@
 # Deployment and environments
 
+Current frontend/integration candidate: [Sprint 3 release report](sprint3-release.md).
+
 For the current staging sprint, use the [Sprint 2 approval packet](sprint2-approval.md) and [hosted acceptance procedure](hosted-acceptance.md). It supersedes historical observations and specifies `hub-preview.crumbyte.com`; the account settings below were not reverified. Hosted config now requires `HUB_OIDC_REQUIRED_AMR`.
 
 **Nothing here has been done.** No Vercel project, DNS record, database, secret or deployment exists for the hub. Every step needs the owner's separate approval. This is the plan to follow once approved.

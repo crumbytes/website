@@ -18,6 +18,7 @@ export async function listConnections(ctx, websiteId) {
   requirePermission(ctx.staff, 'connection.read');
   return asStaff(ctx, async tx => (await tx.query(
     `select ${CONNECTION_COLUMNS},
+       (select max(success.captured_at) from hub.platform_snapshots success where success.connection_id=c.id and success.outcome='ok') as last_successful_at,
        (select jsonb_build_object('outcome', s.outcome, 'error_code', s.error_code, 'captured_at', s.captured_at, 'data', s.data)
           from hub.platform_snapshots s where s.connection_id = c.id order by s.captured_at desc limit 1) as latest_snapshot
      from hub.platform_connections c where c.website_id = $1 order by c.adapter_key`, [websiteId])).rows);

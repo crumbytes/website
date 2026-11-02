@@ -331,13 +331,13 @@ export function createApp(deps) {
     const ctx = contextOf(c);
     const website = await records.getWebsite(ctx, websiteId);
     const id = website.id;
-    const [tasks, schedules, checks, reviews, sources, runs, history, connectionList, operations, assignable, domains, plans, incidents, windows, findings, recovery, workLogs, uptime7, uptime30, uptime90] = await Promise.all([
-      records.listTasks(ctx, { websiteId: id }), records.listSchedules(ctx, { websiteId: id }), records.listChecks(ctx, { websiteId: id }),
+    const [tasks, schedules, checks, reviews, sources, runs, history, connectionList, operations, assignable, domains, plans, incidents, windows, findings, recovery, workLogs, uptime7, uptime30, uptime90, restores] = await Promise.all([
+      records.listTasks(ctx, { websiteId: id }), records.listSchedules(ctx, { websiteId: id, includeInactive: true }), records.listChecks(ctx, { websiteId: id }),
       records.listSecurityReviews(ctx, { websiteId: id }), records.listBackupSources(ctx, { websiteId: id }), records.listBackupRuns(ctx, id),
       records.listHistory(ctx, id), connections.listConnections(ctx, id), connections.listOperations(ctx, id), records.listAssignableStaff(ctx),
       inventory.listDomains(ctx, id), records.listPlans(ctx), insights.listIncidents(ctx, { websiteId: id }), insights.listMaintenanceWindows(ctx, id),
       insights.listFindings(ctx, { websiteId: id }), insights.listRecoveryRequests(ctx, id), records.listWorkLogs(ctx, id),
-      insights.uptimeReport(ctx, { websiteId: id, days: 7 }), insights.uptimeReport(ctx, { websiteId: id, days: 30 }), insights.uptimeReport(ctx, { websiteId: id, days: 90 })
+      insights.uptimeReport(ctx, { websiteId: id, days: 7 }), insights.uptimeReport(ctx, { websiteId: id, days: 30 }), insights.uptimeReport(ctx, { websiteId: id, days: 90 }), records.listRestoreVerifications(ctx,id)
     ]);
     const credentials = {};
     if (can(ctx.staff, 'credential.write')) {
@@ -345,7 +345,7 @@ export function createApp(deps) {
     }
     return pages.websiteDetailPage(viewOf(c), {
       website, tasks, schedules, checks, reviews, sources, runs, history, connections: connectionList, operations, credentials, assignable,
-      config: pageConfig, state, notice: noticeOf(c), domains, plans, incidents, windows, findings, recovery, workLogs, uptime: [uptime7, uptime30, uptime90]
+      config: pageConfig, state, notice: noticeOf(c), domains, plans, incidents, windows, findings, recovery, workLogs, restores, uptime: [uptime7, uptime30, uptime90]
     });
   };
   const renderWebsite = (c, state) => renderWebsiteById(c, c.req.param('id'), state);
@@ -429,7 +429,7 @@ export function createApp(deps) {
     const ctx = contextOf(c);
     const scope = c.req.query('scope') === 'all' ? 'all' : 'open';
     return pages.maintenancePage(viewOf(c), {
-      tasks: await records.listTasks(ctx, { scope }), schedules: await records.listSchedules(ctx), websites: await records.listWebsites(ctx),
+      tasks: await records.listTasks(ctx, { scope }), schedules: await records.listSchedules(ctx, { includeInactive: true }), websites: await records.listWebsites(ctx),
       assignable: await records.listAssignableStaff(ctx), scope, state, notice: noticeOf(c)
     });
   };
@@ -458,6 +458,10 @@ export function createApp(deps) {
     await records.createSchedule(ctx, input);
     return '/maintenance';
   }, renderFromReturn(renderMaintenance));
+  formRoute('/maintenance/schedules/:id/update', async (ctx,input,c) => {
+    await records.updateSchedule(ctx,c.req.param('id'),input);
+    return '/maintenance';
+  }, renderFromReturn(renderMaintenance));
   formRoute('/maintenance/schedules/:id/task', async (ctx, _input, c) => {
     await records.createTaskFromSchedule(ctx, c.req.param('id'));
     return '/maintenance';
@@ -480,8 +484,8 @@ export function createApp(deps) {
   };
   app.get('/monitoring', async c => c.html(await renderMonitoring(c)));
   app.get('/security', async c => c.html(await renderSecurity(c)));
-  app.get('/backups', async c => c.html(pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)) })));
-  const renderBackups = async c => pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)) });
+  app.get('/backups', async c => c.html(pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)), restores: await records.listRestoreVerifications(contextOf(c)) })));
+  const renderBackups = async c => pages.backupsPage(viewOf(c), { sources: await records.listBackupSources(contextOf(c)), restores: await records.listRestoreVerifications(contextOf(c)) });
   formRoute('/monitoring/checks', async (ctx, input) => {
     await records.createCheck(ctx, input);
     return '/monitoring';

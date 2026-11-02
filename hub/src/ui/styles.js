@@ -1,4 +1,4 @@
-// Carries over the look of the website-management.html prototype. Served as one
+// CrumByte workspace styling. Served as one
 // same-origin file so the Content-Security-Policy can forbid inline styles.
 export const HUB_CSS = `
 :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#eaf2ff;background:#08111f;font-synthesis:none;color-scheme:dark}
@@ -60,4 +60,40 @@ code{font-size:12px;background:#091727;border-radius:5px;padding:2px 5px;overflo
 @media(max-width:1000px){.split{grid-template-columns:1fr}}
 td code{white-space:nowrap}
 @media(max-width:760px){.app{grid-template-columns:minmax(0,1fr)}.sidebar{min-width:0;padding:14px 16px;gap:12px;border-right:0;border-bottom:1px solid #243449;position:static;height:auto;overflow:visible}.sidebar>div{min-width:0}.nav-label{display:none}.nav{display:flex;overflow-x:auto;padding-bottom:4px}.nav a{white-space:nowrap;padding:8px 11px}.who{margin-top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px}.who form{margin:0}dl.facts{grid-template-columns:1fr}dd{margin-bottom:6px}}
+
+/* Workspace hierarchy and interaction states; no external assets or scripts. */
+:root{--accent:#72b4ff;--surface:#101e33;--border:#293e59;scroll-behavior:auto}
+body{background:#091324;color:#e8eff9}
+.app{grid-template-columns:244px minmax(0,1fr)}
+.sidebar{background:#0a1425;border-color:#223550;padding:24px 18px;gap:20px}
+.brand{padding:0 8px}.brandmark{background:linear-gradient(145deg,#3b93f7,#1e54be);box-shadow:0 5px 18px #102e59;border:1px solid #5ca8ff;border-radius:11px}
+.brand strong{letter-spacing:-.025em;font-size:20px}.brand small{font-size:10px;letter-spacing:.13em}
+.nav-label{font-size:10px;color:#a6b9d0;letter-spacing:.1em;margin-bottom:14px}
+.nav{gap:4px}.nav a{display:flex;align-items:center;gap:10px;padding:7px 10px;font-size:13px;min-height:34px}
+.nav-symbol{display:inline-flex;align-items:center;justify-content:center;width:19px;flex:0 0 19px;color:#93afcf;font-size:19px;line-height:1}
+.nav a[aria-current=page]{background:#153357;border-color:#315580;color:#fff;box-shadow:inset 3px 0 #72b4ff}.nav a[aria-current=page] .nav-symbol{color:#9acaff}
+.who{background:#101f34;border-color:#293f5b;border-radius:12px}.who .btn{font-size:12px}
+main{padding:28px clamp(20px,3vw,46px) 48px;max-width:1900px;width:100%;margin:0 auto}
+main:focus{outline:none}.topbar{margin-bottom:28px;padding-bottom:24px;border-color:#243852}
+.workspace-path{color:#a6bad3;font-size:12px;margin-bottom:10px}.workspace-path span{padding:0 8px;color:#718da9}
+.environment-note{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#ffdea5;background:#362b1e;border:1px solid #745a33;padding:3px 7px;border-radius:5px;margin:0 0 5px}
+h1{font-size:clamp(25px,3vw,32px);font-weight:750;letter-spacing:-.035em}h2{font-size:17px}
+.workspace-intro{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:24px}.workspace-intro .eyebrow{font-size:10px;color:#8ac0ff;margin:0 0 8px}.workspace-intro h2{font-size:23px;letter-spacing:-.03em;margin-bottom:7px}
+.cards{gap:14px}.primary-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}.coverage-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:28px}
+.card{background:linear-gradient(135deg,#12243d,#101d31);border-color:#2b425f;border-radius:12px;padding:19px;min-width:0}
+.metric-card{display:block;text-decoration:none;color:inherit}.metric-card:hover{background:#172d49;border-color:#6c9dd2;color:#fff}.metric-card .label{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;color:#c3d3e6}.metric-card .label .card-arrow{display:block;flex:0 0 8px;width:8px;height:8px;border-top:1px solid #93b8e0;border-right:1px solid #93b8e0;position:relative;margin:4px 2px 0 0}.card-arrow:after{content:"";position:absolute;width:10px;height:1px;background:#93b8e0;transform:rotate(-45deg);top:3px;left:-2px}
+.metric{font-size:34px;line-height:1.2;letter-spacing:-.04em;margin:13px 0 9px;color:#f4f8ff}.metric.word{font-size:19px;line-height:1.4;margin-bottom:10px}.coverage-metrics .card{background:#0e1c30}.coverage-metrics .note{font-size:11px;color:#a0b4ce}
+.panel{background:#0f1e32;border-color:#293e59;border-radius:13px;box-shadow:0 3px 12px #050b161a}.panel-head{padding:21px 22px 15px}.panel-head>a{font-size:12px;color:#99caff;white-space:nowrap}.panel-body{padding:22px}
+.section-kicker{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#a3bad4;margin:0 0 8px}.approval-note{margin:0;padding:0 22px 16px;color:#b8c9df;font-size:12px;line-height:1.8}
+.feed{list-style:none;margin:0;padding:0 22px 10px}.feed li{display:flex;gap:12px;padding:16px 0;border-top:1px solid #263950;min-width:0}.feed li>div{min-width:0;overflow-wrap:anywhere}.feed p{margin:0 0 5px;font-size:13px;line-height:1.6;color:#d8e4f4}.feed a{font-size:13px;font-weight:600;line-height:1.6}.feed .note{margin-top:5px;font-size:11px;color:#a7bad2}.feed-marker{width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:#75b4ff;margin-top:7px;box-shadow:0 0 0 4px #192e49}.feed-marker.attention{background:#ffc47a;box-shadow:0 0 0 4px #352b20}
+.empty{padding:35px 22px}.empty:before{content:'—';display:block;font-size:23px;color:#94b8e2;margin:0 auto 12px;width:38px;height:38px;border:1px solid #385374;border-radius:10px;line-height:32px;background:#14263d}.empty strong{font-size:14px}.empty p{font-size:12px;color:#a6bad2}
+.btn{background:#2368b8;border-color:#5499e7;color:#fff;border-radius:8px;min-height:38px}.btn:hover{background:#2c7ad1}.btn.quiet{color:#d4e6fb;border-color:#48698e}.btn.danger{background:#6a2a2e;border-color:#bc7379}
+td{line-height:1.6;border-color:#263a52}th{background:#13243b;color:#b0c7e2;font-size:10px;letter-spacing:.07em}tbody tr:hover{background:#14263c}.table-wrap{scrollbar-color:#526f92 #0c1829}
+.stack{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}.stack>.field:has(textarea),.stack>div:has(>button),.stack>.muted,.stack>.banner{grid-column:1/-1}.field label{line-height:1.5}.field .help{line-height:1.6}.field input,.field select{min-height:42px}textarea{min-height:110px}
+.subnav{padding:10px;background:#0d1b2e;border:1px solid #293f5a;border-radius:11px;gap:5px}.subnav a{border-color:transparent;font-size:12px}.subnav a:hover{border-color:#50759c}
+details summary{line-height:1.6;min-height:24px}details[open]{background:#112238}details[open]>summary{margin-bottom:8px;color:#b2d6ff}.tag{max-width:100%;white-space:normal;line-height:1.5}.footer{padding-top:16px;border-top:1px solid #273a51;color:#9cb1cc}
+@media(min-width:1550px){.split{grid-template-columns:minmax(0,1.45fr) minmax(0,1fr)}}
+@media(max-width:1200px){.primary-metrics,.coverage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.app{grid-template-columns:220px minmax(0,1fr)}.sidebar{padding:24px 14px}.split{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){.app{grid-template-columns:minmax(0,1fr)}.sidebar{padding:16px;gap:14px}.brand{padding:0}.brand strong{font-size:18px}.brandmark{width:34px;height:34px}.nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible;padding:0}.nav a{font-size:11px;white-space:normal;padding:7px;gap:5px;min-height:40px;line-height:1.4}.nav-symbol{display:none}.who{padding:9px 12px;font-size:11px}.who strong{font-size:12px}.who .btn{min-height:34px;padding:7px 10px}main{padding:22px 16px 36px}.topbar{margin-bottom:20px;padding-bottom:18px}.workspace-path{font-size:11px}.workspace-intro{align-items:flex-start;flex-direction:column;gap:14px}.workspace-intro h2{font-size:21px}.cards{gap:10px}.card{padding:15px}.metric{font-size:29px}.metric.word{font-size:17px}.primary-metrics .note{font-size:11px}.stack{grid-template-columns:minmax(0,1fr)}.panel-head,.panel-body{padding:17px}.feed{padding:0 17px 5px}.approval-note{padding:0 17px 12px}.filters{width:100%}.filters select{flex:1 1 130px}.filters .btn{flex:1 1 90px}.subnav{gap:3px;padding:6px}.subnav a{padding:7px 9px}details{padding:12px 17px}}
+@media(prefers-reduced-motion:no-preference){.btn,.nav a,.metric-card{transition:background .15s,border-color .15s}}
 `;

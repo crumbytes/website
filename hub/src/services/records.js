@@ -325,16 +325,16 @@ export async function listWorkLogs(ctx, websiteId) {
      where t.website_id = $1 order by l.logged_at desc limit 100`, [websiteId])).rows);
 }
 
-export async function listSchedules(ctx, { websiteId } = {}) {
+export async function listSchedules(ctx, { websiteId, includeInactive = false } = {}) {
   requirePermission(ctx.staff, 'maintenance.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select m.id, m.website_id, m.title, m.kind, m.interval_days, m.next_due_on::text as next_due_on, m.active, m.client_account_id,
+    `select m.id, m.website_id, m.title, m.kind, m.interval_days, m.next_due_on::text as next_due_on, m.active, m.client_account_id, m.default_assignee_id,
        w.display_name as website_name, c.display_name as client_name, s.display_name as assignee_name
      from hub.maintenance_schedules m
      join hub.managed_websites w on w.id = m.website_id
      join hub.client_accounts c on c.id = m.client_account_id
      left join hub.staff_users s on s.id = m.default_assignee_id
-     where m.active and ($1::uuid is null or m.website_id = $1) order by m.next_due_on limit 200`, [websiteId ?? null])).rows);
+     where (m.active or $2::boolean) and ($1::uuid is null or m.website_id = $1) order by m.next_due_on limit 200`, [websiteId ?? null, includeInactive])).rows);
 }
 
 export async function createSchedule(ctx, input) {
@@ -352,12 +352,27 @@ export async function createSchedule(ctx, input) {
   }));
 }
 
+export async function updateSchedule(ctx, id, input) {
+  requirePermission(ctx.staff, 'maintenance.write');
+  if (!isUuid(id)) throw notFound();
+  const data = parse(schemas.scheduleUpdate, input);
+  return asStaff(ctx, async tx => {
+    const schedule = one(await tx.query('select id,client_account_id from hub.maintenance_schedules where id=$1 for update', [id]));
+    if (!schedule) throw notFound();
+    await assertAssignable(tx, data.default_assignee_id, schedule.client_account_id);
+    await tx.query(`update hub.maintenance_schedules set title=$2,kind=$3,interval_days=$4,next_due_on=$5,
+      default_assignee_id=$6,active=$7 where id=$1`,[id,data.title,data.kind,data.interval_days,data.next_due_on,data.default_assignee_id ?? null,data.active]);
+    await auditStaff(tx,ctx,'schedule.update',{entityType:'maintenance_schedule',entityId:id,clientId:schedule.client_account_id,metadata:{active:data.active,interval_days:data.interval_days}});
+    return {id};
+  });
+}
+
 // Turns a due schedule into a task. Staff start this; it is not silently automatic.
 export async function createTaskFromSchedule(ctx, id) {
   requirePermission(ctx.staff, 'maintenance.write');
   if (!isUuid(id)) throw notFound();
   return guarded(() => asStaff(ctx, async tx => {
-    const schedule = one(await tx.query(`select *, next_due_on::text as due from hub.maintenance_schedules where id = $1 and active`, [id]));
+    const schedule = one(await tx.query(`select *, next_due_on::text as due from hub.maintenance_schedules where id = $1 and active for update`, [id]));
     if (!schedule) throw notFound();
     const open = one(await tx.query(`select id from hub.maintenance_tasks where schedule_id = $1 and status in ('open', 'in_progress', 'blocked') limit 1`, [id]));
     if (open) throw conflict('This schedule already has an open task.');
@@ -517,6 +532,16 @@ export async function listBackupRuns(ctx, websiteId) {
      where b.website_id = $1 order by r.finished_at desc limit 50`, [websiteId])).rows);
 }
 
+export async function listRestoreVerifications(ctx, websiteId) {
+  requirePermission(ctx.staff, 'backup.read');
+  return asStaff(ctx, async tx => (await tx.query(`select v.id,v.outcome,v.target_environment,v.checks_performed,v.evidence_ref,v.performed_at,
+    b.website_id,b.label as source_label,w.display_name as website_name,s.display_name as performed_by_name
+    from hub.restore_verifications v join hub.backup_runs r on r.id=v.backup_run_id
+    join hub.backup_sources b on b.id=r.source_id join hub.managed_websites w on w.id=b.website_id
+    join hub.staff_users s on s.id=v.performed_by
+    where ($1::uuid is null or b.website_id=$1) order by v.performed_at desc,v.id limit 100`,[websiteId ?? null])).rows);
+}
+
 export async function recordBackupRun(ctx, input) {
   requirePermission(ctx.staff, 'backup.write');
   const data = parse(schemas.backupRun, input);
@@ -662,10 +687,13 @@ export async function getOverview(ctx) {
         (select count(*)::int from hub.maintenance_tasks where status in ('open', 'in_progress', 'blocked') and due_on < current_date) as overdue_tasks,
         (select count(*)::int from hub.maintenance_schedules where active and next_due_on <= current_date + 7) as schedules_due,
         (select count(*)::int from hub.monitoring_checks where enabled) as active_checks,
-        (select count(distinct check_id)::int from hub.monitoring_results) as checks_with_results,
+        (select count(distinct r.check_id)::int from hub.monitoring_results r join hub.monitoring_checks m on m.id=r.check_id where m.enabled) as checks_with_results,
         (select count(*)::int from hub.security_reviews) as security_reviews,
         (select count(*)::int from hub.backup_sources where active) as backup_sources,
-        (select count(*)::int from hub.platform_connections where status = 'connected') as connected_platforms`));
+        (select count(*)::int from hub.platform_connections where status = 'connected') as connected_platforms,
+        (select count(*)::int from hub.platform_connections) as total_platforms,
+        (select count(distinct s.website_id)::int from hub.backup_sources s join hub.managed_websites w on w.id=s.website_id where s.active and w.lifecycle not in ('archived','offboarded')) as websites_with_backup_sources,
+        (select count(*)::int from hub.maintenance_tasks where requires_approval and approved_at is null and status in ('open','in_progress','blocked')) as tasks_awaiting_approval`));
     const certificates = (await tx.query(`
       select m.website_id, w.display_name as website_name, r.tls_valid_to
       from hub.monitoring_checks m
@@ -687,6 +715,13 @@ export async function getOverview(ctx) {
       where r.next_due_on <= current_date + 7
         and r.reviewed_at = (select max(x.reviewed_at) from hub.security_reviews x where x.website_id = r.website_id)
       order by due_on limit 25`)).rows;
-    return { ...row, certificates, reminders };
+    const activity = (await tx.query(`select h.id,h.website_id,h.kind,h.summary,h.performed_at,h.source,w.display_name as website_name
+      from hub.service_history h join hub.managed_websites w on w.id=h.website_id order by h.performed_at desc,h.id limit 6`)).rows;
+    const incidents = (await tx.query(`select i.id,i.website_id,i.kind,i.opened_at,w.display_name as website_name
+      from hub.incidents i join hub.managed_websites w on w.id=i.website_id where i.status='open' order by i.opened_at desc,i.id limit 5`)).rows;
+    const notifications = (await tx.query(`select id,title,severity,created_at from hub.notifications where staff_id=$1 and read_at is null and (client_account_id is null or hub.can_access_client(client_account_id)) order by created_at desc,id limit 5`,[ctx.staff.id])).rows;
+    const platforms = (await tx.query(`select c.id,c.website_id,c.adapter_key,c.status,c.last_checked_at,c.last_error_code,w.display_name as website_name
+      from hub.platform_connections c join hub.managed_websites w on w.id=c.website_id order by c.last_checked_at desc nulls last,c.created_at desc limit 5`)).rows;
+    return { ...row, certificates, reminders, activity, incidents, notifications, platforms };
   });
 }

@@ -60,6 +60,7 @@ jobs:
         run: |
           node scripts/pg-integration.mjs
           node scripts/pg-security.mjs
+          node scripts/pg-frontend.mjs
         env:
           HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
       - run: npx playwright install --with-deps chromium
