@@ -5,8 +5,8 @@ import { loadConfig, ConfigError } from '../src/config.js';
 import { createHarness } from './helpers.mjs';
 
 const base = { HUB_ENV: 'staging', HUB_BASE_URL: 'https://hub-preview.crumbyte.com',
-  HUB_OIDC_ISSUER: 'https://identity.example.test/', HUB_OIDC_CLIENT_ID: 'staging',
-  DATABASE_URL: 'postgres://hub_runtime@localhost/hub', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for',
+  HUB_OIDC_ISSUER: 'https://identity.example.test/', HUB_OIDC_CLIENT_ID: 'staging', HUB_OIDC_CLIENT_SECRET:'synthetic-secret',
+  DATABASE_URL: 'postgres://hub_runtime:synthetic@localhost/hub?sslmode=verify-full', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for',
   HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_STAGING_DATABASE_HOST: 'localhost', HUB_STAGING_DATABASE_NAME: 'hub', HUB_STAGING_OIDC_ISSUER: 'https://identity.example.test/', HUB_STAGING_OIDC_CLIENT_ID: 'staging' };
 
 test('hosted configuration rejects missing client identity, missing MFA, and unsafe origins', () => {

@@ -1,5 +1,8 @@
 # Operations runbook
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 Status: written from the design. **None of this has been rehearsed on real infrastructure.** Rehearse each on staging before production.
 
 ## Rolling back a release

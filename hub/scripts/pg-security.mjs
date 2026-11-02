@@ -1,3 +1,4 @@
+import { assertLocalDatabaseUrl } from '../src/local-recovery.js';
 // Additional real PostgreSQL security regressions. Run only after pg-integration.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -8,6 +9,7 @@ import { createVault } from '../src/vault.js';
 import { createAuth, sha256 } from '../src/auth.js';
 import * as connections from '../src/services/connections.js';
 const ownerUrl = process.env.HUB_PG_OWNER_URL;
+assertLocalDatabaseUrl(ownerUrl);
 if (!ownerUrl || !['localhost','127.0.0.1'].includes(new URL(ownerUrl).hostname)) throw new Error('Local disposable PostgreSQL required');
 const owner = new pg.Client({connectionString:ownerUrl});
 await owner.connect();
@@ -30,7 +32,7 @@ try {
  const ctx={db,staff:{id:ownerId,role:'owner'},vault,http,operationsEnabled:true,requestId:'synthetic-pg-security'};
  const connection=await connections.createConnection(ctx,site,{adapter_key:'wordpress',auth_type:'application_password',base_url:'https://synthetic.example.test'});
  await connections.storeCredential(ctx,connection.id,{username:'synthetic',application_password:'not-real'});
- const operation=await connections.requestOperation({...ctx,staff:{id:techId,role:'technician'}},{connection_id:connection.id,operation_key:'plugin.set_status',reason:'Synthetic concurrency check',plugin:'a/a',status:'inactive'});
+ const operation=await connections.requestOperation({...ctx,staff:{id:techId,role:'technician'}},{connection_id:connection.id,operation_key:'plugin.set_status',customer_authorization_ref:'synthetic-consent',reason:'Synthetic concurrency check',plugin:'a/a',status:'inactive'});
  await connections.decideOperation(ctx,operation.id,'approved');
  const winning=connections.executeOperation(ctx,operation.id);
  try {

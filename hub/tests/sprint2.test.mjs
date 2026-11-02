@@ -15,7 +15,7 @@ async function operationHarness(http) {
   assert.equal((await owner.post(`/websites/${site}/connections`, { adapter_key: 'wordpress', auth_type: 'application_password', base_url: 'https://atomic.example.test' })).status, 303);
   const connection = (await h.pg.query('select id from hub.platform_connections')).rows[0].id;
   assert.equal((await owner.post(`/connections/${connection}/credential`, { username: 'synthetic', application_password: 'synthetic-only' })).status, 303);
-  assert.equal((await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', reason: 'Synthetic atomic operation', plugin: 'a/a', status: 'inactive' })).status, 303);
+  assert.equal((await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', customer_authorization_ref:'synthetic-consent', reason: 'Synthetic atomic operation', plugin: 'a/a', status: 'inactive' })).status, 303);
   const id = (await h.pg.query('select id from hub.operation_requests')).rows[0].id;
   assert.equal((await admin.post(`/operations/${id}/approve`)).status, 303);
   return { ...h, owner, admin, id };
@@ -82,10 +82,10 @@ test('disabling staff permanently revokes every session, while a new login after
 });
 
 test('staging rejects mismatched production-like bindings and every live integration flag', () => {
-  const base = { HUB_ENV: 'staging', HUB_BASE_URL: 'https://hub-preview.crumbyte.com', DATABASE_URL: 'postgres://hub_runtime@staging.example.test/hub_staging',
+  const base = { HUB_ENV: 'staging', HUB_BASE_URL: 'https://hub-preview.crumbyte.com', DATABASE_URL: 'postgres://hub_runtime:synthetic@staging.example.test/hub_staging?sslmode=verify-full',
     HUB_STAGING_DATABASE_HOST: 'staging.example.test', HUB_STAGING_DATABASE_NAME: 'hub_staging',
     HUB_OIDC_ISSUER: 'https://staging-id.example.test/', HUB_STAGING_OIDC_ISSUER: 'https://staging-id.example.test/',
-    HUB_OIDC_CLIENT_ID: 'staging-client', HUB_STAGING_OIDC_CLIENT_ID: 'staging-client', HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for' };
+    HUB_OIDC_CLIENT_ID: 'staging-client', HUB_OIDC_CLIENT_SECRET:'synthetic-secret', HUB_STAGING_OIDC_CLIENT_ID: 'staging-client', HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for' };
   assert.equal(loadConfig(base).environment, 'staging');
   for (const change of [ { DATABASE_URL: 'postgres://hub_runtime@production.example.test/hub_staging' },
     { DATABASE_URL: 'postgres://hub_runtime@staging.example.test/production' }, { DATABASE_URL: 'postgres://owner@staging.example.test/hub_staging' },

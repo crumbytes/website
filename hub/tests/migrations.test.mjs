@@ -7,8 +7,8 @@ test('migrations apply in order, record a checksum, and run only once', async ()
   const pg = new PGlite();
   const logged = [];
   const ran = await migrate(pg, { log: line => logged.push(line) });
-  assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql', '0004_execution_and_revocation.sql']);
-  assert.equal(logged.length, 4);
+  assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql', '0004_execution_and_revocation.sql', '0005_portal_and_automation.sql']);
+  assert.equal(logged.length, 5);
   assert.deepEqual(await migrate(pg), [], 'nothing to do the second time');
   await pg.close();
 });
@@ -29,7 +29,7 @@ test('a failed migration rolls back completely and can be retried', async () => 
   assert.equal((await pg.query(`select count(*)::int as n from hub_meta.migrations`)).rows[0].n, 0);
   assert.equal((await pg.query(`select to_regclass('hub.client_accounts') as t`)).rows[0].t, null);
   await pg.exec(`drop table hub.staff_users; drop schema hub`);
-  assert.equal((await migrate(pg)).length, 4);
+  assert.equal((await migrate(pg)).length, 5);
   await pg.close();
 });
 

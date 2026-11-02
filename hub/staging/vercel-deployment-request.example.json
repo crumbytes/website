@@ -1,0 +1,11 @@
+{
+  "name": "crumbyte-hub-staging",
+  "project": "REPLACE_WITH_APPROVED_STAGING_PROJECT_ID",
+  "gitSource": {
+    "type": "github",
+    "repoId": 1432611751,
+    "ref": "codex/hub-release-candidate",
+    "sha": "REPLACE_WITH_APPROVED_FULL_RELEASE_SHA"
+  },
+  "withLatestCommit": false
+}

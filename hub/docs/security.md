@@ -1,5 +1,8 @@
 # Website Management Hub: security design
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 Status: implemented and tested locally and in CI, on in-process PostgreSQL and a throwaway PostgreSQL 17 server. It has **not** had an independent security review, and has never run on hosted infrastructure.
 
 ## Authentication

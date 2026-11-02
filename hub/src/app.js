@@ -19,6 +19,7 @@ import * as records from './services/records.js';
 import { barePage } from './ui/layout.js';
 import * as pages from './ui/pages.js';
 import * as pages2 from './ui/pages2.js';
+import { registerPortalRoutes } from './portal-routes.js';
 import { HUB_CSS } from './ui/styles.js';
 
 const CSP = "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -95,6 +96,10 @@ export function createApp(deps) {
     c.set('staff', resolved.staff);
     c.set('csrfToken', resolved.csrfToken);
     c.set('sessionId', resolved.sessionId);
+    if (resolved.staff.is_customer && !(path === '/portal' || path.startsWith('/portal/') || path === '/logout' || path === '/account' || path.startsWith('/account/sessions/') || path === '/api/v1/me')) {
+      if (path === '/' && c.req.method === 'GET') return c.redirect('/portal');
+      return isApi(path) ? c.json({error:{code:'forbidden',message:'Use the customer portal.'}},403) : c.text('This route is restricted to internal staff. Use the customer portal.',403);
+    }
 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
       const origin = c.req.header('origin');
@@ -154,6 +159,8 @@ export function createApp(deps) {
     ? c.json({ error: { code: 'not_found', message: 'Not found.' } }, 404)
     : c.html(errorPage('Not found', 'That page does not exist.'), 404)));
 
+  registerPortalRoutes(app,{contextOf,viewOf});
+
   // Public routes ------------------------------------------------------------
 
   app.get('/healthz', c => c.json({ ok: true }));
@@ -167,7 +174,7 @@ export function createApp(deps) {
 
   app.get('/login', c => c.html(barePage({
     title: 'Sign in',
-    body: html`<h1>Staff sign in</h1><p class="muted">This is a private CrumByte system. Access is limited to provisioned staff, and activity is logged.</p>
+    body: html`<h1>Sign in</h1><p class="muted">This is a private CrumByte system. Access is limited to provisioned staff and customers, and activity is logged.</p>
       <a class="btn" href="/auth/start">Sign in with your work account</a>`
   })));
 
@@ -269,7 +276,7 @@ export function createApp(deps) {
 
   const renderClients = async (c, state) => {
     const ctx = contextOf(c);
-    return pages.clientsPage(viewOf(c), { clients: await records.listClients(ctx), plans: await records.listPlans(ctx), planTasks: await inventory.listPlanTasks(ctx), notice: noticeOf(c), state });
+    return pages.clientsPage(viewOf(c), { clients: await records.listClients(ctx,{search:c.req.query('q'),status:c.req.query('status')||'all'}), plans: await records.listPlans(ctx), planTasks: await inventory.listPlanTasks(ctx), notice: noticeOf(c), state });
   };
   app.get('/clients', async c => c.html(await renderClients(c)));
   app.get('/clients/new', c => {

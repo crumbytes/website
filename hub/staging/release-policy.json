@@ -1,0 +1,43 @@
+{
+  "description": "Desired staging policy, not an applied provider API payload or observed infrastructure state",
+  "source_baseline": "cf90c7a5f811f5f9acce1f8af8fba59da56cbd5b",
+  "marketing_baseline": "a2ecbdbf4c75caa21cfbffe51b020e4742426601",
+  "project_name": "crumbyte-hub-staging",
+  "repository": "crumbytes/website",
+  "root_directory": "hub",
+  "node_major": 24,
+  "framework": "Other",
+  "target": "preview",
+  "git_auto_deployment": false,
+  "production_authorized": false,
+  "deployment_protection_required": true,
+  "hostnames": [
+    "hub-preview.crumbyte.com"
+  ],
+  "callback": "https://hub-preview.crumbyte.com/auth/callback",
+  "runtime_database_role": "hub_runtime",
+  "database_major": 17,
+  "database_tls": "verify-full",
+  "external_integrations": "disabled",
+  "scheduled_jobs": "disabled",
+  "hosted_ready": false,
+  "reviewed_staging_config_blob": "7aa099711fd60e89f4959ae0bb834b06c0aff4db",
+  "configuration_delta": "Completed portal, safe DNS/monitoring leases, durable schedules, reversible sharing, rotation and local recovery; hosted startup hardening",
+  "database_provider": "Neon",
+  "database_project_name": "crumbyte-hub-staging",
+  "database_plan_preference": "Free only after account-level zero-recurring-cost eligibility verification",
+  "protected_neon_project": "frosty-union-75655676",
+  "database_provider_account_verified": false,
+  "free_tier_security_compatible": false,
+  "database_organization_owner_confirmed": "org-winter-breeze-07874558",
+  "identity_provider_candidate": "ZITADEL Cloud Free or verified existing licensed compatible MFA provider",
+  "identity_provider_account_verified": false,
+  "reviewed_application_trees": {
+    "hub/src": "91b03a2cd1881215b526a242dda2da4367b1a039",
+    "hub/api": "b127b9ad2a17a9795912a67509158ee7a000abd6",
+    "hub/db": "bd9f191d8ebceec21b05e6c384fa862619cf218c"
+  },
+  "development_start": "7ba168ce57e9bf755741b05c93e5c0271d471db0",
+  "migration_files": 5,
+  "credentials_deferred_during_development": true
+}

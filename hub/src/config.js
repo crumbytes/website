@@ -63,6 +63,14 @@ export function loadConfig(env = process.env) {
   if (flag(env.HUB_R2_ENABLED) && !(env.HUB_R2_ACCOUNT_ID && env.HUB_R2_BUCKET && env.HUB_R2_ACCESS_KEY_ID && env.HUB_R2_SECRET_ACCESS_KEY)) problems.push('R2 needs its account, bucket and key settings');
 
   if (!isDev) {
+    required('HUB_OIDC_CLIENT_SECRET');
+    if(env.HUB_OIDC_REQUIRED_AMR!=='mfa')problems.push('Hosted sign-in must require mfa');
+    try {
+      const url=new URL(env.DATABASE_URL);
+      if(!['postgres:','postgresql:'].includes(url.protocol)||!url.password||url.searchParams.getAll('sslmode').length!==1||url.searchParams.get('sslmode')!=='verify-full')problems.push('Hosted database authentication and sslmode=verify-full are required');
+      if([...url.searchParams.keys()].some(key=>!['sslmode','application_name','connect_timeout'].includes(key)))problems.push('Unreviewed database connection overrides are prohibited');
+      if(env.NODE_TLS_REJECT_UNAUTHORIZED==='0')problems.push('TLS verification cannot be disabled');
+    }catch{problems.push('Hosted DATABASE_URL is invalid');}
     required('DATABASE_URL');
     // Without it every person shares one sign-in limit and can lock the others out.
     required('HUB_TRUSTED_IP_HEADER');
@@ -75,9 +83,29 @@ export function loadConfig(env = process.env) {
     const stagingClient = required('HUB_STAGING_OIDC_CLIENT_ID');
     try {
       const db = new URL(env.DATABASE_URL);
+      let runtimeLogin = 'hub_runtime';
+      const projectRef = env.HUB_STAGING_SUPABASE_PROJECT_REF;
+      const protectedRefs = ['oyvnmolqtzzfljvztfbe', 'tpkptbpzasrcozjorcko'];
+      const supabaseHost = db.hostname.endsWith('.supabase.co') || db.hostname.endsWith('.pooler.supabase.com');
+      if (projectRef || supabaseHost) {
+        if (!projectRef || !/^[a-z0-9]{20}$/.test(projectRef) || protectedRefs.includes(projectRef)) {
+          problems.push('A new, independently approved HUB_STAGING_SUPABASE_PROJECT_REF is required; StackLTR projects are prohibited');
+        }
+        const sharedPooler = db.hostname.endsWith('.pooler.supabase.com');
+        if ((!sharedPooler && db.hostname !== `db.${projectRef}.supabase.co`) || databaseName !== 'postgres') {
+          problems.push('Supabase connection must match the approved new project and postgres database');
+        }
+        if (sharedPooler) {
+          runtimeLogin = `hub_runtime.${projectRef}`;
+          if (!['5432', '6543'].includes(db.port)) problems.push('Supabase shared pooler requires an explicit supported port');
+        }
+      }
+      if (protectedRefs.some(ref => db.hostname.includes(ref) || decodeURIComponent(db.username).includes(ref))) {
+        problems.push('Existing StackLTR database connections are prohibited for Hub staging');
+      }
       if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.hostname !== databaseHost ||
-          decodeURIComponent(db.pathname.slice(1)) !== databaseName || decodeURIComponent(db.username) !== 'hub_runtime') {
-        problems.push('Staging DATABASE_URL must match the approved host/database and hub_runtime role');
+          decodeURIComponent(db.pathname.slice(1)) !== databaseName || decodeURIComponent(db.username) !== runtimeLogin) {
+        problems.push('Staging DATABASE_URL must match the approved host/database and dedicated hub_runtime login');
       }
     } catch { problems.push('Staging DATABASE_URL is invalid'); }
     if (issuer !== stagingIssuer || clientId !== stagingClient) problems.push('Staging OIDC configuration must match the approved staging identity');

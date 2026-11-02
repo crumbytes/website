@@ -1,5 +1,8 @@
 # Customer website recovery runbook
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 The hub tracks and authorizes a recovery. **It never restores anything itself.** A person carries it out with the backup provider's tools.
 
 ## Backup requirements

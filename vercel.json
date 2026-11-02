@@ -3,7 +3,8 @@
     "deploymentEnabled": {
       "feat/website-hub-foundation-20261101": false,
       "codex/hub-staging-review": false,
-      "codex/hub-frontend-integration": false
+      "codex/hub-frontend-integration": false,
+      "codex/hub-release-candidate": false
     }
   },
   "cleanUrls": true,

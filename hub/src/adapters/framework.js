@@ -85,7 +85,9 @@ export function createPlatformClient({ baseUrl, http, authHeaders = {}, timeoutM
         throw new AdapterError('network_error');
       }
       if (response.status < 200 || response.status >= 300) {
-        const retryAfter = Number(response.headers?.['retry-after']);
+        const rawRetry=response.headers?.['retry-after'];
+        const seconds=/^\d+$/.test(String(rawRetry))?Number(rawRetry):(Date.parse(rawRetry)-Date.now())/1000;
+        const retryAfter=Number.isFinite(seconds)?Math.min(3600,Math.max(1,Math.ceil(seconds))):undefined;
         throw new AdapterError(codeForStatus(response.status), response.status, Number.isFinite(retryAfter) ? retryAfter : undefined);
       }
       if (!response.body) return null;

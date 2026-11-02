@@ -90,3 +90,12 @@ test('TLS probes refuse internal targets', async () => {
   assert.equal(await code(createSafeHttp().tlsCertificate({ url: 'https://127.0.0.1/' })), 'blocked_target');
   assert.equal(await code(createSafeHttp({ resolve: resolvesTo('10.0.0.3') }).tlsCertificate({ url: 'https://public.example.test/' })), 'blocked_target');
 });
+
+test('hexadecimal IPv4-mapped IPv6 and transition addresses cannot bypass SSRF restrictions',async()=>{
+ for(const address of ['::ffff:7f00:1','::ffff:a00:1','::ffff:a9fe:a9fe','2002:7f00:1::','64:ff9b:1::a00:1'])assert.equal(isBlockedAddress(address),true,address);
+ for(const url of ['https://[::ffff:7f00:1]/','https://[::ffff:a9fe:a9fe]/'])assert.equal(await code(createSafeHttp().request({url})),'blocked_target');
+});
+test('DNS-only monitoring rejects private answers and emits sorted public records',async()=>{
+ assert.equal(await code(createSafeHttp({resolve:resolvesTo('10.0.0.1')}).dnsAddresses({url:'https://public.example.test'})),'blocked_target');
+ assert.deepEqual(await createSafeHttp({resolve:resolvesTo('1.1.1.1')}).dnsAddresses({url:'https://public.example.test'}),['1.1.1.1']);
+});

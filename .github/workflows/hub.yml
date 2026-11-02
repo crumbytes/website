@@ -40,6 +40,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -50,18 +53,25 @@ jobs:
         run: |
           python3 scripts/check-seo.py
           node --test tests/contact.test.mjs
+      - name: Certify release inputs
+        run: node scripts/certify-release.mjs
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
       - name: Create a non-superuser owner
         run: |
-          psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner"
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner" -c "create database hub_restore owner hub_owner"
       - name: PostgreSQL integration
         run: |
           node scripts/pg-integration.mjs
           node scripts/pg-security.mjs
           node scripts/pg-frontend.mjs
+          node scripts/pg-recovery.mjs
         env:
           HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
+      - name: Verify official serverless build
+        run: |
+          npm install --prefix "$RUNNER_TEMP/hub-builder" --no-audit --no-fund @vercel/node@29.0.1 @vercel/build-utils@15.2.1
+          HUB_BUILDER_TOOLS_DIR="$RUNNER_TEMP/hub-builder" node scripts/verify-serverless-build.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

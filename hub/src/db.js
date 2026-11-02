@@ -22,7 +22,7 @@ export function createDb(driver) {
 }
 
 export function pgDriver(connectionString, Pool) {
-  const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 10000 });
+  const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 10000, connectionTimeoutMillis: 8000, query_timeout: 15000, statement_timeout: 15000 });
   const checked = new WeakSet();
   return {
     async transaction(fn) {

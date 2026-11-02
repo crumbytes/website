@@ -69,6 +69,17 @@ export function createVault({ storageEnabled, keks, activeKey }) {
         auth_tag: b64(body.tag)
       };
     },
+    rewrap(row) {
+      if (!storageEnabled) throw unavailable('Credential storage is turned off for this environment.');
+      const old = keys.get(row.key_id);
+      if (!old) throw unavailable('The old credential key is not available.');
+      const aad = aadFor(row.connection_id,row.id);
+      const dek=gcmDecrypt(old,{ciphertext:unb64(row.wrapped_dek),nonce:unb64(row.dek_nonce),tag:unb64(row.dek_tag)},aad);
+      try {
+        const wrapped=gcmEncrypt(keys.get(activeKey),dek,aad);
+        return {key_id:activeKey,wrapped_dek:b64(wrapped.ciphertext),dek_nonce:b64(wrapped.nonce),dek_tag:b64(wrapped.tag)};
+      } finally {dek.fill(0);}
+    },
     decrypt(row) {
       if (!storageEnabled) throw unavailable('Credential storage is turned off for this environment.');
       const key = keys.get(row.key_id);

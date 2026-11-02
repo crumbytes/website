@@ -12,6 +12,8 @@ const NAV = [
   ['/', 'Overview', 'overview.read'],
   ['/websites', 'Client websites', 'website.read'],
   ['/clients', 'Clients', 'client.read'],
+  ['/workflows', 'Automation settings', 'maintenance.read'],
+  ['/requests', 'Customer requests', 'maintenance.read'],
   ['/maintenance', 'Maintenance', 'maintenance.read'],
   ['/monitoring', 'Monitoring', 'monitoring.read'],
   ['/security', 'Security', 'security.read'],
@@ -35,20 +37,20 @@ export function shell({ title, active, view, body, notice, actions }) {
 <aside class="sidebar" aria-label="Hub navigation">
   <a class="brand" href="/"><span class="brandmark" aria-hidden="true">C</span><span><strong>CrumByte</strong><small>Website hub</small></span></a>
   <div><p class="nav-label">Manage your workspace</p><nav class="nav" aria-label="Sections">
-    ${NAV.filter(item => can(staff, item[2])).map(([href, label]) =>
-      html`<a href="${href}" ${href === active ? raw('aria-current="page"') : ''}><span class="nav-symbol" aria-hidden="true">${({'/':'◫','/websites':'▦','/clients':'◇','/maintenance':'✓','/monitoring':'⌁','/security':'◈','/backups':'▣','/hosting':'▤','/integrations':'⊞','/staff':'○','/audit':'≡'})[href]}</span>${label}</a>`)}
-    <a href="/notifications" ${active === '/notifications' ? raw('aria-current="page"') : ''}>Notifications${unread ? html` <span class="tag warn">${unread}<span class="skip"> unread</span></span>` : ''}</a>
+    ${(staff.is_customer ? [['/portal','Customer portal','overview.read']] : NAV).filter(item => can(staff, item[2])).map(([href, label]) =>
+      html`<a href="${href}" ${href === active ? raw('aria-current="page"') : ''}><span class="nav-symbol" aria-hidden="true">${({'/':'◫','/websites':'▦','/clients':'◇','/maintenance':'✓','/monitoring':'⌁','/security':'◈','/backups':'▣','/hosting':'▤','/integrations':'⊞','/staff':'○','/audit':'≡'})[href]??'◇'}</span>${label}</a>`)}
+    ${!staff.is_customer ? html`<a href="/notifications" ${active === '/notifications' ? raw('aria-current="page"') : ''}>Notifications${unread ? html` <span class="tag warn">${unread}<span class="skip"> unread</span></span>` : ''}</a>` : ''}
     <a href="/account" ${active === '/account' ? raw('aria-current="page"') : ''}>Your account</a>
   </nav></div>
   <div class="who"><div><strong>${staff.display_name}</strong>${roleLabel(staff.role)}</div>
     <form method="post" action="/logout">${csrf(csrfToken)}<button class="btn quiet" type="submit">Sign out</button></form></div>
 </aside>
 <main id="main" tabindex="-1">
-  <header class="topbar"><div><div class="workspace-path">CrumByte Technologies <span aria-hidden="true">/</span> Internal workspace</div>${ENVIRONMENT_NOTE[environment] ? html`<span class="environment-note">${ENVIRONMENT_NOTE[environment]}</span>` : ''}<h1>${title}</h1></div>
+  <header class="topbar"><div><div class="workspace-path">CrumByte Technologies <span aria-hidden="true">/</span> ${staff.is_customer?'Customer workspace':'Internal workspace'}</div>${ENVIRONMENT_NOTE[environment] ? html`<span class="environment-note">${ENVIRONMENT_NOTE[environment]}</span>` : ''}<h1>${title}</h1></div>
     ${actions ? html`<div>${actions}</div>` : ''}</header>
   ${notice ? html`<div class="banner ${notice.kind ?? ''}" role="status"><strong>${notice.title}</strong>${notice.text ?? ''}</div>` : ''}
   ${body}
-  <footer class="footer">Internal use only. Every change is written to the audit log.</footer>
+  <footer class="footer">Authorized access only. Changes are recorded in the audit log.</footer>
 </main></div></body></html>`;
 }
 
