@@ -27,7 +27,7 @@ export function createStackltrClient({ enabled, baseUrl, token }, http) {
   };
 }
 
-export async function deliverOutbox({ db, stackltr, limit = 25 }) {
+export async function deliverOutbox({ db, stackltr, limit = 25, deadline=Date.now()+30000 }) {
   if (!stackltr?.enabled) return { sent: 0, failed: 0, skipped: 'stackltr_disabled' };
   const pending = await db.as('hub_worker', null, async tx => (await tx.query(
     `select o.id, o.client_account_id, o.event_type, o.idempotency_key, o.payload, o.attempts, c.stackltr_workspace_id, c.stackltr_company_id
@@ -36,6 +36,7 @@ export async function deliverOutbox({ db, stackltr, limit = 25 }) {
   let sent = 0;
   let failed = 0;
   for (const event of pending) {
+    if(Date.now()>=deadline)break;
     // A client that is not linked keeps its events until an admin links it.
     if (!event.stackltr_company_id) continue;
     let code = null;

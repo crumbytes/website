@@ -5,7 +5,7 @@ const emptyToNull = value => (typeof value === 'string' && value.trim() === '' ?
 const text = (min, max) => z.string().trim().min(min).max(max);
 const optionalText = max => z.preprocess(emptyToNull, z.string().trim().max(max).nullable().optional());
 const optionalUuid = z.preprocess(emptyToNull, z.string().uuid().nullable().optional());
-const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date').refine(value => !Number.isNaN(Date.parse(value)), 'Use a valid date');
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date').refine(value => !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value && value >= '0001-01-01', 'Use a valid date');
 const optionalDate = z.preprocess(emptyToNull, dateOnly.nullable().optional());
 // Date-time inputs have no zone, and the forms label them as UTC. An empty value
 // stays undefined so it fails, because coercing null would produce 1970.
@@ -114,7 +114,7 @@ export const schemas = {
   }),
   monitoringCheck: z.object({
     website_id: z.string().uuid(),
-    kind: z.enum(['uptime', 'ssl']),
+    kind: z.enum(['uptime', 'ssl', 'dns']),
     interval_minutes: z.coerce.number().int().min(5).max(10080).default(60),
     failure_threshold: z.coerce.number().int().min(1).max(20).default(2),
     response_warn_ms: optionalInt(100, 60000),

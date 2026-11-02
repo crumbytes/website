@@ -1,5 +1,8 @@
 # CMS adapter framework and platform capabilities
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 **No adapter has connected to a live site.** Each is written from official documentation and tested against simulated responses. That shows the hub handles those response shapes and failures. It does not show that a real platform behaves the same way. The table below is from documentation reviewed on 2026-11-01. Confirm each row with an authorized test site before relying on it.
 
 ## Support levels

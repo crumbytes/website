@@ -63,6 +63,14 @@ export function loadConfig(env = process.env) {
   if (flag(env.HUB_R2_ENABLED) && !(env.HUB_R2_ACCOUNT_ID && env.HUB_R2_BUCKET && env.HUB_R2_ACCESS_KEY_ID && env.HUB_R2_SECRET_ACCESS_KEY)) problems.push('R2 needs its account, bucket and key settings');
 
   if (!isDev) {
+    required('HUB_OIDC_CLIENT_SECRET');
+    if(env.HUB_OIDC_REQUIRED_AMR!=='mfa')problems.push('Hosted sign-in must require mfa');
+    try {
+      const url=new URL(env.DATABASE_URL);
+      if(!['postgres:','postgresql:'].includes(url.protocol)||!url.password||url.searchParams.getAll('sslmode').length!==1||url.searchParams.get('sslmode')!=='verify-full')problems.push('Hosted database authentication and sslmode=verify-full are required');
+      if([...url.searchParams.keys()].some(key=>!['sslmode','application_name','connect_timeout'].includes(key)))problems.push('Unreviewed database connection overrides are prohibited');
+      if(env.NODE_TLS_REJECT_UNAUTHORIZED==='0')problems.push('TLS verification cannot be disabled');
+    }catch{problems.push('Hosted DATABASE_URL is invalid');}
     required('DATABASE_URL');
     // Without it every person shares one sign-in limit and can lock the others out.
     required('HUB_TRUSTED_IP_HEADER');

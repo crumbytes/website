@@ -1,3 +1,4 @@
+import { assertLocalDatabaseUrl } from '../src/local-recovery.js';
 // Runs in CI against a disposable PostgreSQL server, as a non-superuser owner and
 // through the real pg driver, to catch what an in-process database would hide.
 // Refuses anything except a local server, so it cannot touch a hosted database.
@@ -6,6 +7,7 @@ import pg from 'pg';
 import { createDb, migrate, pgDriver } from '../src/db.js';
 
 const ownerUrl = process.env.HUB_PG_OWNER_URL;
+assertLocalDatabaseUrl(ownerUrl);
 if (!ownerUrl || !['localhost', '127.0.0.1'].includes(new URL(ownerUrl).hostname)) {
   console.error('HUB_PG_OWNER_URL must point at a local disposable server.');
   process.exit(1);
@@ -18,7 +20,7 @@ assert.equal(me.rolsuper, false, 'The migration owner must not be a superuser');
 
 const executor = { exec: sql => owner.query(sql), query: (sql, params) => owner.query(sql, params) };
 const ran = await migrate(executor);
-assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql', '0004_execution_and_revocation.sql']);
+assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql', '0004_execution_and_revocation.sql', '0005_portal_and_automation.sql']);
 assert.deepEqual(await migrate(executor), []);
 
 const runtimePassword = 'disposable-ci-password';

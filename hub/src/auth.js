@@ -26,10 +26,14 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
   const { oidc, session } = config;
 
   async function discover() {
-    const response = await fetchImpl(`${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(8000) });
+    const response = await fetchImpl(`${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(8000), redirect:'error' });
     if (!response.ok) throw new LoginDenied('discovery_failed');
     const metadata = await response.json();
     if (metadata.issuer !== oidc.issuer) throw new LoginDenied('issuer_mismatch');
+    for (const field of ['authorization_endpoint','token_endpoint','jwks_uri']) {
+      let endpoint;try {endpoint=new URL(metadata[field]);}catch{throw new LoginDenied('invalid_discovery');}
+      if(endpoint.origin!==new URL(oidc.issuer).origin||endpoint.username||endpoint.password||endpoint.hash||(!config.isDev&&endpoint.protocol!=='https:'))throw new LoginDenied('invalid_discovery');
+    }
     return metadata;
   }
 
@@ -72,14 +76,14 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
         });
         if (oidc.clientSecret) form.set('client_secret', oidc.clientSecret);
         const tokenResponse = await fetchImpl(metadata.token_endpoint, {
-          method: 'POST', body: form, signal: AbortSignal.timeout(8000),
+          method: 'POST', body: form, redirect:'error', signal: AbortSignal.timeout(8000),
           headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }
         });
         if (!tokenResponse.ok) throw new LoginDenied('token_exchange_failed');
         const { id_token: idToken } = await tokenResponse.json();
         if (typeof idToken !== 'string') throw new LoginDenied('missing_id_token');
 
-        const jwks = await (await fetchImpl(metadata.jwks_uri, { signal: AbortSignal.timeout(8000) })).json();
+        const jwks = await (await fetchImpl(metadata.jwks_uri, { signal: AbortSignal.timeout(8000), redirect:'error' })).json();
         let claims;
         try {
           ({ payload: claims } = await jwtVerify(idToken, createLocalJWKSet(jwks), {
@@ -109,7 +113,7 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
       if (!rawToken) return null;
       return db.as('hub_auth', null, async tx => {
         const row = one(await tx.query(
-          `select s.id as session_id, s.csrf_token, s.last_seen_at, u.id, u.email, u.display_name, u.role
+          `select s.id as session_id, s.csrf_token, s.last_seen_at, u.id, u.email, u.display_name, u.role, u.is_customer
            from hub.staff_sessions s join hub.staff_users u on u.id = s.staff_id
            where s.token_hash = $1 and s.revoked_at is null and s.idle_expires_at > $2
              and s.absolute_expires_at > $2 and u.status = 'active'`,
@@ -122,7 +126,7 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
             [sha256(rawToken), now(), new Date(now().getTime() + session.idleMinutes * 60000)]);
         }
         return {
-          staff: { id: row.id, email: row.email, display_name: row.display_name, role: row.role },
+          staff: { id: row.id, email: row.email, display_name: row.display_name, role: row.role, is_customer: row.is_customer },
           csrfToken: row.csrf_token,
           sessionId: row.session_id
         };
@@ -138,6 +142,7 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
   };
 
   async function openSession(tx, claims, requestId) {
+    if (claims.email_verified !== true || typeof claims.email !== 'string') throw new LoginDenied('email_not_verified');
     let staff = one(await tx.query(
       `select id, status from hub.staff_users where oidc_issuer = $1 and oidc_subject = $2 for update`, [oidc.issuer, claims.sub]));
     if (!staff) {

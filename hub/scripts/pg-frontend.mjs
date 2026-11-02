@@ -1,3 +1,4 @@
+import { assertLocalDatabaseUrl } from '../src/local-recovery.js';
 // Exercises new frontend projections through the actual non-owner runtime pool.
 // Only a local disposable database already seeded by pg-integration is accepted.
 import assert from 'node:assert/strict';

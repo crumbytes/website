@@ -29,6 +29,8 @@ export function overviewPage(view, data) {
     body: html`
     <section class="workspace-intro" aria-labelledby="workspace-title"><div><p class="eyebrow">Website operations</p><h2 id="workspace-title">Your website workspace</h2><p class="muted">Inventory, work and recorded checks for the clients you can access.</p></div><a class="btn quiet" href="/maintenance">View maintenance</a></section>
     <div class="cards primary-metrics">
+      ${card('Customer requests',data.open_requests??0,'Open, in progress or waiting',false,'/requests')}
+      ${card('Pending updates',data.pending_updates??0,'Recorded update tasks, not inferred provider updates',false,'/maintenance')}
       ${card('Managed websites', data.websites, data.websites ? 'Active and paused websites in your scope' : 'None added yet', false, '/websites')}
       ${card('Open maintenance', data.open_tasks, data.overdue_tasks ? `${data.overdue_tasks} overdue` : 'None overdue', false, '/maintenance')}
       ${card('Open findings', data.open_findings, 'Recorded findings awaiting resolution', false, '/security')}
@@ -151,6 +153,7 @@ function connectionSection(view, website, connections, operations, credentials, 
     ${connection && canManage ? html`<details><summary>${credential ? 'Replace or revoke credential' : 'Store credential'}</summary>
       ${config.credentialStorageEnabled ? html`<p class="muted">${authType?.guidance}</p>
         ${postForm(`/connections/${connection.id}/credential`, view, html`${fields(authType.fields.map(field => ({ name: field.name, label: field.label, type: 'password', required: true })))}${submit('Encrypt and store')}`)}
+        ${credential ? postForm(`/connections/${connection.id}/rewrap`,view,submit('Rewrap encryption key','btn quiet')) : ''}
         ${credential ? postForm(`/connections/${connection.id}/credential/revoke`, view, submit('Revoke stored credential', 'btn danger')) : ''}`
         : html`<p class="muted">Credential storage is turned off in this environment. No credential can be entered or stored here.</p>`}</details>` : ''}
     ${connection && adapter.operations.length ? operationsSection(view, connection, adapter, operations.filter(item => item.connection_id === connection.id), config) : ''}
@@ -222,7 +225,7 @@ export function websiteDetailPage(view, data) {
       ${monitoringExtras(view, website, { incidents, windows, uptime })}
       ${can(view.staff, 'monitoring.write') && existingKinds.size < 2 ? html`<details><summary>Enable a check</summary>${postForm('/monitoring/checks', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">
         ${fields([
-          { name: 'kind', label: 'Check', type: 'select', required: true, options: [{ value: 'uptime', label: 'Uptime' }, { value: 'ssl', label: 'SSL certificate expiry' }].filter(item => !existingKinds.has(item.value)) },
+          { name: 'kind', label: 'Check', type: 'select', required: true, options: [{ value: 'uptime', label: 'Uptime' }, { value: 'dns', label: 'DNS addresses' }, { value: 'ssl', label: 'SSL certificate expiry' }].filter(item => !existingKinds.has(item.value)) },
           { name: 'interval_minutes', label: 'Run every (minutes)', type: 'number', required: true, value: 60 },
           { name: 'failure_threshold', label: 'Open an incident after this many failures in a row', type: 'number', required: true, value: 2 },
           { name: 'response_warn_ms', label: 'Warn when slower than (ms)', type: 'number' },
@@ -261,7 +264,7 @@ export function websiteDetailPage(view, data) {
     </section>
 
     <section class="panel" id="history"><div class="panel-head"><div><h2>Service history</h2><p class="muted">Permanent record of work on this website. Entries cannot be edited.</p></div></div>
-      ${history.length ? html`<div class="panel-body"><ul class="plain">${history.map(item => html`<li>${dateTime(item.performed_at)} ${tag(item.kind)} ${item.summary} <span class="note">${item.performed_by_name ?? 'System'}${item.source === 'system' ? ' (automatic)' : ''}</span></li>`)}</ul></div>` : empty('No history yet', 'Completed work on this website will appear here.')}
+      ${history.length ? html`<div class="panel-body"><ul class="plain">${history.map(item => html`<li>${dateTime(item.performed_at)} ${tag(item.kind)} ${item.summary} <span class="note">${item.performed_by_name ?? 'System'}${item.source === 'system' ? ' (automatic)' : ''}</span>${writeMaintenance ? postForm(`/history/${item.id}/share`,view,submit('Share this entry with customers','btn quiet'),'inline'):''}${writeMaintenance ? postForm(`/history/${item.id}/unshare`,view,submit('Remove from customer portal','btn quiet'),'inline'):''}</li>`)}</ul></div>` : empty('No history yet', 'Completed work on this website will appear here.')}
       ${writeMaintenance ? html`<details><summary>Record completed work</summary>${postForm('/history', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">
         ${fields([{ name: 'kind', label: 'Type', type: 'select', required: true, options: ['maintenance', 'security', 'backup', 'restore', 'connection', 'other'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) },
           { name: 'summary', label: 'What was done', type: 'textarea', required: true }, { name: 'performed_at', label: 'Performed (UTC)', type: 'datetime-local', required: true, value: nowLocal() }])}${submit('Add to history')}`)}</details>` : ''}
@@ -306,12 +309,13 @@ function taskTable(view, tasks, assignees, showWebsite) {
       ${showWebsite ? html`<td><a href="/websites/${task.website_id}">${task.website_name}</a><br><span class="note">${task.client_name}</span></td>` : ''}
       <td>${statusTag(task.priority)}</td><td>${statusTag(task.status)}</td><td>${task.assignee_name ?? html`<span class="muted">Unassigned</span>`}</td>
       <td>${task.due_on ?? html`<span class="muted">None</span>`}${task.due_on && task.due_on < today() && !['completed', 'cancelled'].includes(task.status) ? html` ${tag('Overdue', 'bad')}` : ''}</td>
-      ${write ? html`<td>${['completed', 'cancelled'].includes(task.status) ? '' : html`
+      ${write ? html`<td><details><summary>Rollback plan or outcome</summary>${postForm(`/tasks/${task.id}/rollback`,view,html`${fields([{name:'plan',label:'Rollback plan / work performed',type:'textarea',required:true},{name:'status',label:'Rollback status',type:'select',required:true,options:[{value:'planned',label:'Planned'},{value:'completed',label:'Completed'},{value:'failed',label:'Failed'}]},{name:'evidence_ref',label:'Evidence (required after execution)'}])}${submit('Record rollback')}`)}</details>${['completed', 'cancelled'].includes(task.status) ? '' : html`
         ${postForm(`/maintenance/tasks/${task.id}/update`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
           <select name="status" aria-label="Status for ${task.title}">${['open', 'in_progress', 'blocked', 'cancelled'].map(value => html`<option value="${value}" ${value === task.status ? raw('selected') : ''}>${value.replaceAll('_', ' ')}</option>`)}</select>
           <select name="assignee_id" aria-label="Assignee for ${task.title}"><option value="">Unassigned</option>${assignees.map(item => html`<option value="${item.value}" ${item.value === task.assignee_id ? raw('selected') : ''}>${item.label}</option>`)}</select>
           <button class="btn quiet" type="submit">Update</button>`, 'inline')}
         ${task.requires_approval && !task.approved_at && can(view.staff, 'operation.decide') && task.created_by !== view.staff.id ? postForm(`/maintenance/tasks/${task.id}/approve`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}"><button class="btn quiet" type="submit">Approve change</button>`, 'inline') : ''}
+
         <details><summary>Log work</summary>${postForm(`/maintenance/tasks/${task.id}/worklog`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
           ${fields([{ name: 'note', label: 'What you did', type: 'textarea', required: true }, { name: 'minutes', label: 'Minutes', type: 'number' }])}${submit('Add to work log', 'btn quiet')}`)}</details>
         ${task.requires_approval && !task.approved_at ? '' : html`<details><summary>Complete</summary>${postForm(`/maintenance/tasks/${task.id}/complete`, view, html`<input type="hidden" name="_return" value="${showWebsite ? '/maintenance' : `/websites/${task.website_id}`}">
@@ -328,10 +332,10 @@ const scheduleRow = (view, item, assignees = [], onWebsite = false) => html`<li>
 
 export function checkTable(checks, showWebsite) {
   return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Check</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest result</th><th>Details</th><th>Checked</th></tr></thead><tbody>
-    ${checks.map(check => html`<tr><td>${check.kind === 'ssl' ? 'SSL certificate' : 'Uptime'}<br><span class="note">every ${check.interval_minutes} min</span></td>
+    ${checks.map(check => html`<tr><td>${check.kind === 'ssl' ? 'SSL certificate' : check.kind==='dns'?'DNS addresses':'Uptime'}<br><span class="note">every ${check.interval_minutes} min</span></td>
       ${showWebsite ? html`<td><a href="/websites/${check.website_id}">${check.website_name}</a><br><span class="note">${check.client_name}</span></td>` : ''}
       <td>${monitoringTag(check.outcome)}</td>
-      <td>${check.http_status ? `HTTP ${check.http_status}` : ''}${check.response_ms != null ? `, ${check.response_ms} ms` : ''}${check.tls_valid_to ? `Expires ${dateTime(check.tls_valid_to)}` : ''}${check.tls_issuer ? `, ${check.tls_issuer}` : ''}${check.error_code ? ` ${ERROR_MESSAGES[check.error_code] ?? check.error_code}` : ''}</td>
+      <td>${check.dns_addresses ? check.dns_addresses.join(', ') : ''}${check.dns_changed ? ' (changed)' : ''}${check.http_status ? `HTTP ${check.http_status}` : ''}${check.response_ms != null ? `, ${check.response_ms} ms` : ''}${check.tls_valid_to ? `Expires ${dateTime(check.tls_valid_to)}` : ''}${check.tls_issuer ? `, ${check.tls_issuer}` : ''}${check.error_code ? ` ${ERROR_MESSAGES[check.error_code] ?? check.error_code}` : ''}</td>
       <td>${check.checked_at ? dateTime(check.checked_at) : html`<span class="muted">Never</span>`}</td></tr>`)}
   </tbody></table></div>`;
 }
@@ -366,8 +370,8 @@ export function clientsPage(view, { clients, plans, planTasks, notice, state }) 
   return shell({
     title: 'Clients', active: '/clients', view, notice,
     actions: write ? html`<a class="btn" href="/clients/new">Add client</a>` : '',
-    body: html`${stateBanner(state)}<div class="banner"><strong>Customer details stay in StackLTR.</strong>The hub only keeps the name and a link. Contacts, tickets and invoices are not stored or copied here.</div>
-    <section class="panel">${clients.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Client</th><th>Websites</th><th>Status</th><th>StackLTR</th></tr></thead><tbody>
+    body: html`${stateBanner(state)}<div class="banner"><strong>Customer details stay in StackLTR.</strong>The hub only keeps the name and a link. Sales, billing and CRM tickets stay in StackLTR. The portal keeps only scoped operational contacts and local service requests.</div>
+    <section class="panel"><form method="get" action="/clients" class="filters"><label>Search clients<input name="q" type="search" maxlength="160"></label><label>Client status<select name="status"><option value="all">All</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label><button class="btn" type="submit">Filter clients</button></form>${clients.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Client</th><th>Websites</th><th>Status</th><th>StackLTR</th></tr></thead><tbody>
       ${clients.map(client => html`<tr><td><a href="/clients/${client.id}">${client.display_name}</a></td><td>${client.website_count}</td><td>${statusTag(client.status)}</td><td>${client.stackltr_company_id ? tag('Linked', 'good') : tag('Not linked', 'unknown')}</td></tr>`)}
     </tbody></table></div>` : empty('No clients yet', write ? 'Add a client to begin. No sample records are created.' : 'You are not assigned to any clients yet. Ask an admin for access.')}</section>
     <section class="panel"><div class="panel-head"><div><h2>Maintenance plans</h2><p class="muted">Recurring work for a website, with a StackLTR billing reference. Pricing and invoices stay in StackLTR.</p></div></div>
@@ -389,6 +393,7 @@ export function clientFormPage(view, { client, websites, state, notice, stackltr
   ];
   return shell({
     title: client ? client.display_name : 'Add client', active: '/clients', view, notice,
+    actions: client ? html`<a class="btn quiet" href="/reports/customer/${client.id}">Customer report</a><a class="btn quiet" href="/portal?client=${client.id}">Portal preview / contacts</a>` : '',
     body: html`${client && stackltr ? stackltrPanel(view, { ...stackltr, client }) : ''}${client ? html`<section class="panel"><div class="panel-head"><h2>Websites</h2></div>${websites.length ? html`<div class="panel-body"><ul class="plain">${websites.map(site => html`<li><a href="/websites/${site.id}">${site.display_name}</a> <span class="note">${site.primary_url}</span></li>`)}</ul></div>` : empty('No websites', 'This client has no managed websites.')}</section>` : ''}
     ${write ? html`<section class="panel"><div class="panel-body">${formErrorBanner(state)}${postForm(client ? `/clients/${client.id}` : '/clients', view, html`${fields(list, { values: { status: 'active', ...values }, errors: state?.errors })}${submit(client ? 'Save client' : 'Add client')}`)}</div></section>`
       : html`<section class="panel"><div class="panel-body"><dl class="facts"><dt>Status</dt><dd>${statusTag(client.status)}</dd><dt>StackLTR</dt><dd>${client.stackltr_company_id ?? 'Not linked'}</dd></dl></div></section>`}`

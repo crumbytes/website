@@ -1,5 +1,8 @@
 # Deployment and environments
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 Current release preparation: [Sprint 4 approval package](sprint4-approval.md). No provider resources were applied.
 
 Current frontend/integration candidate: [Sprint 3 release report](sprint3-release.md).

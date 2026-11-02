@@ -30,12 +30,12 @@ async function visibleWebsite(tx, websiteId) {
 
 // Clients --------------------------------------------------------------------
 
-export async function listClients(ctx) {
+export async function listClients(ctx,{search='',status='all'}={}) {
   requirePermission(ctx.staff, 'client.read');
   return asStaff(ctx, async tx => (await tx.query(
     `select c.id, c.display_name, c.status, c.stackltr_company_id, c.stackltr_billing_ref,
        (select count(*)::int from hub.managed_websites w where w.client_account_id = c.id and w.lifecycle not in ('offboarded', 'archived')) as website_count
-     from hub.client_accounts c order by lower(c.display_name)`)).rows);
+     from hub.client_accounts c where c.display_name ilike $1 and ($2='all' or c.status=$2) order by lower(c.display_name) limit 200`,['%'+String(search).slice(0,160)+'%',status])).rows);
 }
 
 export async function getClient(ctx, id) {
@@ -185,6 +185,7 @@ export async function updateWebsite(ctx, id, input) {
       `update hub.managed_websites set display_name = $2, primary_url = $3, cms_platform = $4, cms_other_name = $5, hosting_provider_id = $6,
          account_owner_id = $7, service_plan_id = $8, lifecycle = $9, notes = $10, updated_at = now() where id = $1`,
       [id, data.display_name, data.primary_url, data.cms_platform, data.cms_other_name, data.hosting_provider_id ?? null, data.account_owner_id ?? null, data.service_plan_id ?? null, data.lifecycle, data.notes]);
+    await tx.query('update hub.monitoring_checks set target_url=$2,lease_token=null,lease_until=null,next_run_at=now() where website_id=$1 and target_url<>$2',[id,data.primary_url]);
     await auditStaff(tx, ctx, 'website.update', { entityType: 'managed_website', entityId: id, clientId: current.client_account_id, metadata: { url: data.primary_url, lifecycle: data.lifecycle } });
     return { id };
   }), 'A website with that address is already managed.');
@@ -416,7 +417,7 @@ export async function listChecks(ctx, { websiteId } = {}) {
   return asStaff(ctx, async tx => (await tx.query(
     `select m.id, m.website_id, m.kind, m.target_url, m.interval_minutes, m.enabled, m.next_run_at, m.failure_threshold, m.response_warn_ms, m.cert_warn_days,
        w.display_name as website_name, c.display_name as client_name,
-       r.outcome, r.http_status, r.response_ms, r.tls_valid_to, r.tls_issuer, r.error_code, r.checked_at
+       r.outcome, r.http_status, r.response_ms, r.tls_valid_to, r.tls_issuer, r.error_code, r.dns_addresses, r.dns_changed, r.checked_at
      from hub.monitoring_checks m
      join hub.managed_websites w on w.id = m.website_id
      join hub.client_accounts c on c.id = m.client_account_id
@@ -597,7 +598,7 @@ export async function listAssignableStaff(ctx) {
 export async function listStaff(ctx) {
   requirePermission(ctx.staff, 'staff.read');
   return asStaff(ctx, async tx => {
-    const staff = (await tx.query(`select id, email, display_name, role, status, last_login_at from hub.staff_users order by lower(display_name)`)).rows;
+    const staff = (await tx.query(`select id, email, display_name, role, status, is_customer, last_login_at from hub.staff_users order by lower(display_name)`)).rows;
     const assignments = (await tx.query(
       `select a.staff_id, a.client_account_id, c.display_name as client_name
        from hub.staff_client_assignments a join hub.client_accounts c on c.id = a.client_account_id order by lower(c.display_name)`)).rows;
@@ -624,6 +625,8 @@ export async function updateStaff(ctx, id, input) {
   if (id === ctx.staff.id) throw invalid({ role: 'You cannot change your own role or status.' });
   if (data.role === 'owner' && ctx.staff.role !== 'owner') throw invalid({ role: 'Only an owner can make someone an owner.' });
   return guarded(() => asStaff(ctx, async tx => {
+    const current=one(await tx.query('select is_customer from hub.staff_users where id=$1',[id]));
+    if(current?.is_customer && data.role!=='viewer')throw invalid({role:'Customer accounts use portal-only Viewer access.'});
     const row = one(await tx.query(
       `update hub.staff_users set role = $2, status = $3, updated_at = now() where id = $1 returning id`, [id, data.role, data.status]));
     if (!row) throw notFound();
@@ -680,6 +683,8 @@ export async function getOverview(ctx) {
   return asStaff(ctx, async tx => {
     const row = one(await tx.query(`
       select
+        (select count(*)::int from hub.support_requests where status in ('open','in_progress','waiting')) as open_requests,
+        (select count(*)::int from hub.maintenance_tasks where kind in ('software_update','plugin_update') and status in ('open','blocked','in_progress')) as pending_updates,
         (select count(*)::int from hub.managed_websites where lifecycle not in ('offboarded', 'archived')) as websites,
         (select count(*)::int from hub.incidents where status = 'open') as open_incidents,
         (select count(*)::int from hub.security_findings where status in ('open', 'in_progress')) as open_findings,

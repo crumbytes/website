@@ -19,7 +19,7 @@ for (const [address, prefix] of [
   ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
 ]) blocked.addSubnet(address, prefix, 'ipv4');
 for (const [address, prefix] of [
-  ['::', 128], ['::1', 128], ['64:ff9b::', 96], ['100::', 64], ['2001:db8::', 32], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]
+  ['::', 128], ['::1', 128], ['64:ff9b:1::', 48], ['2002::', 16], ['2001::', 32], ['64:ff9b::', 96], ['100::', 64], ['2001:db8::', 32], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8]
 ]) blocked.addSubnet(address, prefix, 'ipv6');
 
 export function isBlockedAddress(address) {
@@ -112,6 +112,21 @@ export function createSafeHttp({ resolve = dnsLookup, allowPrivate = false, allo
         if (body) req.write(body);
         req.end();
       });
+    },
+    async dnsAddresses({ url: rawUrl }) {
+      if (!enabled) throw new OutboundError('outbound_disabled');
+      const url = checkTarget(rawUrl, { allowHttp: true, allowPrivate, allowAnyPort });
+      const host = url.hostname.replace(/^\[|\]$/g, '');
+      const addresses = await new Promise((ok, fail) => {
+        const timer = setTimeout(() => fail(new OutboundError('timeout')), 8000);
+        resolve(host, { all: true }, (error, answers) => {
+          clearTimeout(timer);
+          if (error) return fail(classify(error));
+          if (!answers?.length || (!allowPrivate && answers.some(a => isBlockedAddress(a.address)))) return fail(new OutboundError('blocked_target'));
+          ok([...new Set(answers.map(a => a.address))].sort().slice(0,20));
+        });
+      });
+      return addresses;
     },
     tlsCertificate({ url: rawUrl, timeoutMs = 10000 }) {
       if (!enabled) return Promise.reject(new OutboundError('outbound_disabled'));

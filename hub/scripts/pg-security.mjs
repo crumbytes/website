@@ -1,3 +1,4 @@
+import { assertLocalDatabaseUrl } from '../src/local-recovery.js';
 // Additional real PostgreSQL security regressions. Run only after pg-integration.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -8,6 +9,7 @@ import { createVault } from '../src/vault.js';
 import { createAuth, sha256 } from '../src/auth.js';
 import * as connections from '../src/services/connections.js';
 const ownerUrl = process.env.HUB_PG_OWNER_URL;
+assertLocalDatabaseUrl(ownerUrl);
 if (!ownerUrl || !['localhost','127.0.0.1'].includes(new URL(ownerUrl).hostname)) throw new Error('Local disposable PostgreSQL required');
 const owner = new pg.Client({connectionString:ownerUrl});
 await owner.connect();

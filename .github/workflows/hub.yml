@@ -60,12 +60,13 @@ jobs:
       - run: npm test
       - name: Create a non-superuser owner
         run: |
-          psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner"
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner" -c "create database hub_restore owner hub_owner"
       - name: PostgreSQL integration
         run: |
           node scripts/pg-integration.mjs
           node scripts/pg-security.mjs
           node scripts/pg-frontend.mjs
+          node scripts/pg-recovery.mjs
         env:
           HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
       - name: Verify official serverless build

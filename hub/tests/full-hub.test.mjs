@@ -634,7 +634,7 @@ test('logs are structured, redacted and leave out paths with IDs', async () => {
 });
 
 test('staging and production are configured strictly, and staging is marked', async () => {
-  const base = { HUB_BASE_URL: 'https://hub-staging.example.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', DATABASE_URL: 'postgres://hub_runtime@db.test/x', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for', HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_STAGING_DATABASE_HOST: 'db.test', HUB_STAGING_DATABASE_NAME: 'x', HUB_STAGING_OIDC_ISSUER: ISSUER, HUB_STAGING_OIDC_CLIENT_ID: 'x' };
+  const base = { HUB_BASE_URL: 'https://hub-staging.example.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', HUB_OIDC_CLIENT_SECRET:'synthetic-secret', DATABASE_URL: 'postgres://hub_runtime:synthetic@db.test/x?sslmode=verify-full', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for', HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_STAGING_DATABASE_HOST: 'db.test', HUB_STAGING_DATABASE_NAME: 'x', HUB_STAGING_OIDC_ISSUER: ISSUER, HUB_STAGING_OIDC_CLIENT_ID: 'x' };
   const staging = loadConfig({ ...base, HUB_ENV: 'staging' });
   assert.equal(staging.isDev, false);
   assert.equal(staging.session.secure, true);

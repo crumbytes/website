@@ -473,10 +473,11 @@ test('StackLTR delivery is idempotent, holds unlinked clients, retries outages a
   await fresh.close();
 });
 
-test('the hub stores no contact, invoice or ticket copies of StackLTR records', async () => {
+test('the hub keeps CRM records out of client accounts and stores only scoped operational contacts', async () => {
   const columns = (await h.pg.query(`select table_name, column_name from information_schema.columns where table_schema = 'hub'`)).rows;
   const tables = new Set(columns.map(item => item.table_name));
-  for (const banned of ['contacts', 'invoices', 'tickets', 'customers', 'companies', 'payments']) {
+  assert.ok(tables.has('client_contacts'), 'operational contact records have an explicit tenant boundary');
+  for (const banned of ['invoices', 'tickets', 'customers', 'companies', 'payments']) {
     assert.ok(![...tables].some(name => name.includes(banned)), banned);
   }
   const clientColumns = columns.filter(item => item.table_name === 'client_accounts').map(item => item.column_name);

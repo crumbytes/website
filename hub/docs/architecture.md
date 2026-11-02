@@ -1,5 +1,8 @@
 # Website Management Hub: architecture
 
+Current product completion, portal/automation/recovery additions and operator instructions: [product-handbook.md](product-handbook.md). Earlier dated details below describe their original implementation/review scope.
+
+
 Status: built and tested locally. **Not deployed.** Nothing here has connected to a live customer site, a hosted database or StackLTR. See [acceptance.md](acceptance.md) for exact status and [deployment.md](deployment.md) for the environment plan.
 
 ## What it is

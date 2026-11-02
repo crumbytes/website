@@ -290,3 +290,17 @@ export async function executeOperation(ctx, id) {
   });
   return { id, code };
 }
+
+// Rewrap only the data key: ciphertext, credential identity and nonce stay intact.
+export async function rewrapCredential(ctx,connectionId){
+ requirePermission(ctx.staff,'credential.write');
+ if(!ctx.vault.enabled)throw unavailable('Credential storage is turned off for this environment.');
+ const connection=await asStaff(ctx,tx=>visibleConnection(tx,connectionId));
+ return ctx.db.as('hub_worker',null,async tx=>{
+  const row=one(await tx.query('select * from hub.connection_credentials where connection_id=$1 and revoked_at is null for update',[connection.id]));
+  if(!row)throw notFound();const wrapped=ctx.vault.rewrap(row);
+  await tx.query('update hub.connection_credentials set key_id=$2,wrapped_dek=$3,dek_nonce=$4,dek_tag=$5 where id=$1',[row.id,wrapped.key_id,wrapped.wrapped_dek,wrapped.dek_nonce,wrapped.dek_tag]);
+  await auditStaff(tx,ctx,'credential.rewrap',{clientId:connection.client_account_id,entityType:'platform_connection',entityId:connection.id});
+  return {id:connection.id};
+ });
+}

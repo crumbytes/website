@@ -19,7 +19,7 @@ export function createEmailSender({ enabled, apiKey, from }, http) {
   };
 }
 
-export async function deliverEmails({ db, email, baseUrl, logger, limit = 25 }) {
+export async function deliverEmails({ db, email, baseUrl, logger, limit = 25, deadline=Date.now()+30000 }) {
   if (!email?.enabled) return { sent: 0, failed: 0, skipped: 'email_disabled' };
   const pending = await db.as('hub_worker', null, async tx => (await tx.query(
     `select n.id, n.title, n.body, n.link_path, n.email_attempts, u.email from hub.notifications n join hub.staff_users u on u.id = n.staff_id
@@ -27,6 +27,7 @@ export async function deliverEmails({ db, email, baseUrl, logger, limit = 25 }) 
   let sent = 0;
   let failed = 0;
   for (const item of pending) {
+    if(Date.now()>=deadline)break;
     let ok = true;
     try {
       await email.send({

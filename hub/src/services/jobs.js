@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { safeCode } from '../adapters/framework.js';
 import { writeAudit } from '../audit.js';
 import { deliverEmails } from '../email.js';
 import { OutboundError } from '../safe-http.js';
+import { enqueueDueMaintenance } from './automation.js';
 import { deliverOutbox } from '../stackltr.js';
 
 const CODE = error => (error instanceof OutboundError ? error.code : 'internal_error');
@@ -10,6 +12,10 @@ const DAY = 86400000;
 // A result row is only written when a probe truly ran. If probing is turned off,
 // nothing is recorded and the check keeps showing as unknown.
 export async function probeCheck(http, check) {
+  if (check.kind === 'dns') {
+    try { return { outcome: 'up', dns_addresses: await http.dnsAddresses({url:check.target_url}) }; }
+    catch(error) { return {outcome:'error',error_code:CODE(error)}; }
+  }
   if (check.kind === 'ssl') {
     try {
       const certificate = await http.tlsCertificate({ url: check.target_url });
@@ -104,37 +110,52 @@ async function evaluateResult(tx, check, result, inWindow, now, emailEnabled) {
   }
 }
 
-export async function runDueMonitoring({ db, http, outboundEnabled, emailEnabled = false, now = () => new Date(), limit = 50 }) {
+export async function runDueMonitoring({ db, http, outboundEnabled, emailEnabled = false, now = () => new Date(), limit = 50, deadline=Date.now()+30000 }) {
   if (!outboundEnabled) return { ran: 0, skipped: 'outbound_disabled' };
-  const due = await db.as('hub_worker', null, async tx => (await tx.query(
-    `select m.id, m.client_account_id, m.website_id, m.kind, m.target_url, m.interval_minutes, m.failure_threshold, m.response_warn_ms, m.cert_warn_days, w.display_name as website_name
-     from hub.monitoring_checks m join hub.managed_websites w on w.id = m.website_id
-     where m.enabled and w.lifecycle = 'active' and m.next_run_at <= $1 order by m.next_run_at limit $2`, [now(), limit])).rows);
+  const token = randomUUID();
+  // Claim one at a time: no lease can expire while waiting behind 49 network probes.
+  let ran=0;
+  for (let n=0; n<Math.min(limit,50)&&Date.now()<deadline; n++) {
+    const due = await db.as('hub_worker',null,async tx=>(await tx.query(
+      `update hub.monitoring_checks m set lease_token=$2,lease_until=$1::timestamptz+interval '2 minutes'
+       from (select x.id from hub.monitoring_checks x join hub.managed_websites w on w.id=x.website_id
+         where x.enabled and w.lifecycle='active' and x.next_run_at <= $1 and (x.lease_until is null or x.lease_until < $1)
+         order by x.next_run_at for update of x skip locked limit 1) candidate
+       where m.id=candidate.id returning m.*`,[now(),token])).rows);
+    if(!due.length)break;
   for (const check of due) {
     const result = await probeCheck(http, check);
     const checkedAt = now();
     await db.as('hub_worker', null, async tx => {
+      const held=(await tx.query('select id from hub.monitoring_checks where id=$1 and lease_token=$2 and enabled for update',[check.id,token])).rows.length;
+      if(!held)return;
+      const previous=(await tx.query('select dns_addresses from hub.monitoring_results where check_id=$1 and dns_addresses is not null order by checked_at desc limit 1',[check.id])).rows[0]?.dns_addresses;
+      const dnsChanged=Boolean(previous&&result.dns_addresses&&JSON.stringify(previous)!==JSON.stringify(result.dns_addresses));
+      if(dnsChanged)await notifyClientStaff(tx,{clientId:check.client_account_id,kind:'dns.changed',severity:'warning',title:'DNS addresses changed',body:check.target_url,link:`/websites/${check.website_id}`,dedupeKey:`dns:${check.id}:${JSON.stringify(result.dns_addresses)}`,emailEnabled});
       const inWindow = (await tx.query(
         `select 1 from hub.maintenance_windows where website_id = $1 and starts_at <= $2 and ends_at > $2 limit 1`, [check.website_id, checkedAt])).rows.length > 0;
       await tx.query(
-        `insert into hub.monitoring_results (client_account_id, check_id, outcome, http_status, response_ms, tls_valid_to, tls_issuer, error_code, checked_at, in_maintenance_window)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        `insert into hub.monitoring_results (client_account_id, check_id, outcome, http_status, response_ms, tls_valid_to, tls_issuer, error_code, checked_at, in_maintenance_window,dns_addresses,dns_changed)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11,$12)`,
         [check.client_account_id, check.id, result.outcome, result.http_status ?? null, result.response_ms ?? null,
-          result.tls_valid_to ?? null, result.tls_issuer ?? null, result.error_code ?? null, checkedAt, inWindow]);
-      await tx.query(`update hub.monitoring_checks set next_run_at = $2 where id = $1`,
+          result.tls_valid_to ?? null, result.tls_issuer ?? null, result.error_code ?? null, checkedAt, inWindow, result.dns_addresses ? JSON.stringify(result.dns_addresses) : null,dnsChanged]);
+      await tx.query(`update hub.monitoring_checks set lease_token=null,lease_until=null,next_run_at = $2 where id = $1`,
         [check.id, new Date(checkedAt.getTime() + check.interval_minutes * 60000)]);
+      check.website_name=(await tx.query('select display_name from hub.managed_websites where id=$1',[check.website_id])).rows[0]?.display_name??'Website';
       await evaluateResult(tx, check, result, inWindow, checkedAt, emailEnabled);
+      ran++;
     });
   }
-  if (due.length) {
-    await db.as('hub_worker', null, tx => writeAudit(tx, { action: 'monitoring.run', metadata: { checks: due.length } }));
   }
-  return { ran: due.length };
+  if (ran) {
+    await db.as('hub_worker', null, tx => writeAudit(tx, { action: 'monitoring.run', metadata: { checks: ran } }));
+  }
+  return { ran };
 }
 
 // Registry data over RDAP. Where a registry offers nothing, the date is left as it
 // was, because guessing an expiry date is worse than having none.
-export async function syncDomainExpiry({ db, http, outboundEnabled, now = () => new Date(), limit = 25 }) {
+export async function syncDomainExpiry({ db, http, outboundEnabled, now = () => new Date(), limit = 25, deadline=Date.now()+30000 }) {
   if (!outboundEnabled) return { checked: 0, skipped: 'outbound_disabled' };
   const domains = await db.as('hub_worker', null, async tx => (await tx.query(
     `select id, hostname from hub.website_domains where expiry_checked_at is null or expiry_checked_at < $1 order by expiry_checked_at nulls first limit $2`,
@@ -149,6 +170,7 @@ export async function syncDomainExpiry({ db, http, outboundEnabled, now = () => 
   }
   let updated = 0;
   for (const domain of domains) {
+    if(Date.now()>=deadline)break;
     const labels = domain.hostname.split('.');
     const registrable = labels.slice(-2).join('.');
     const server = services.find(([tlds]) => tlds.includes(labels.at(-1)))?.[1]?.find(url => url.startsWith('https://'));
@@ -171,13 +193,14 @@ export async function syncDomainExpiry({ db, http, outboundEnabled, now = () => 
   return { checked: domains.length, updated };
 }
 
-export async function runBackupProviderSync({ db, providers = {}, logger }) {
+export async function runBackupProviderSync({ db, providers = {}, logger, deadline=Date.now()+30000 }) {
   if (!Object.keys(providers).length) return { synced: 0, skipped: 'no_provider_configured' };
   const sources = await db.as('hub_worker', null, async tx => (await tx.query(
     `select id, client_account_id, website_id, storage_provider, storage_ref from hub.backup_sources where active and storage_provider <> 'manual'`)).rows);
   let synced = 0;
   let failed = 0;
   for (const source of sources) {
+    if(Date.now()>=deadline)break;
     const provider = providers[source.storage_provider];
     if (!provider) continue;
     try {
@@ -209,6 +232,9 @@ export async function generateReminders({ db, emailEnabled = false, now = () => 
       await notifyClientStaff(tx, { emailEnabled, ...notice });
       created += 1;
     };
+    for(const task of (await tx.query("select id,title,client_account_id,website_id,updated_at from hub.maintenance_tasks where status='blocked' limit 200")).rows){
+      await send({clientId:task.client_account_id,kind:'maintenance.failed',severity:'warning',title:`Blocked maintenance: ${task.title}`,body:'Review the task and its approval before retrying. No automatic CMS retry was sent.',link:`/websites/${task.website_id}`,dedupeKey:`blocked:${task.id}:${new Date(task.updated_at).toISOString()}`});
+    }
     for (const task of (await tx.query(
       `select t.id, t.title, t.client_account_id, t.website_id, w.display_name from hub.maintenance_tasks t join hub.managed_websites w on w.id = t.website_id
        where t.status in ('open', 'in_progress', 'blocked') and t.due_on < $1::date and w.lifecycle <> 'archived' limit 200`, [stamp])).rows) {
@@ -233,8 +259,8 @@ export async function generateReminders({ db, emailEnabled = false, now = () => 
       const link = `/websites/${source.website_id}`;
       if (source.status === 'failed') {
         await send({ clientId: source.client_account_id, kind: 'backup.failed', severity: 'critical', title: `Backup failed: ${source.display_name}`, body: source.label, link, dedupeKey: `backup-failed:${source.run_id}` });
-      } else if (source.expected_interval_hours && source.finished_at
-        && today.getTime() - new Date(source.finished_at).getTime() > source.expected_interval_hours * 1.5 * 3600000) {
+      } else if (source.expected_interval_hours && (!source.finished_at
+        || today.getTime() - new Date(source.finished_at).getTime() > source.expected_interval_hours * 1.5 * 3600000)) {
         await send({ clientId: source.client_account_id, kind: 'backup.overdue', severity: 'warning', title: `Backup overdue: ${source.display_name}`, body: source.label, link, dedupeKey: `backup-overdue:${source.id}:${stamp}` });
       }
     }
@@ -244,8 +270,10 @@ export async function generateReminders({ db, emailEnabled = false, now = () => 
 
 // Each step runs on its own, so one failing part cannot stop the others.
 export async function runJobs(deps) {
+  deps={...deps,deadline:Date.now()+45000};
   const { logger } = deps;
   const step = async (name, fn) => {
+    if(Date.now()>=deps.deadline)return {skipped:'execution_budget'};
     try {
       return await fn();
     } catch (error) {
@@ -255,9 +283,10 @@ export async function runJobs(deps) {
   };
   const emailEnabled = Boolean(deps.email?.enabled);
   return {
+    maintenance: await step('maintenance',()=>enqueueDueMaintenance(deps)),
     monitoring: await step('monitoring', () => runDueMonitoring({ ...deps, emailEnabled })),
     domains: await step('domains', () => syncDomainExpiry(deps)),
-    backups: await step('backups', () => runBackupProviderSync(deps)),
+    backups: await step('backups', () => runBackupProviderSync({...deps,providers:deps.backupProviders??{}})),
     reminders: await step('reminders', () => generateReminders({ ...deps, emailEnabled })),
     stackltr: await step('stackltr', () => deliverOutbox(deps)),
     email: await step('email', () => deliverEmails(deps))
