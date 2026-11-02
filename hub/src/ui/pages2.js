@@ -144,7 +144,7 @@ export function monitoringDashboardPage(view, { checks, incidents, config, table
     notice: config.outboundEnabled ? null : { kind: 'warn', title: 'Probes are turned off in this environment.', text: ' No site is contacted, and checks stay unknown.' },
     body: html`<div class="cards">
       <div class="card"><div class="label">Open incidents</div><div class="metric">${open.length}</div><div class="note">From consecutive failed checks</div></div>
-      <div class="card"><div class="label">Enabled checks</div><div class="metric">${checks.filter(item => item.enabled).length}</div><div class="note">${checks.filter(item => item.checked_at).length} have a real result</div></div>
+      <div class="card"><div class="label">Enabled checks</div><div class="metric">${checks.filter(item => item.enabled).length}</div><div class="note">${checks.filter(item => item.enabled && item.checked_at).length} have a real result</div></div>
     </div>
     <section class="panel"><div class="panel-head"><h2>Incidents</h2></div>${incidents.length ? incidentTable(view, incidents, true) : empty('No incidents recorded', 'This only covers websites with enabled checks that have run.')}</section>
     <section class="panel"><div class="panel-head"><h2>Checks</h2></div>${checks.length ? table : empty('No checks enabled', 'Enable uptime and certificate checks from a website page.')}</section>`

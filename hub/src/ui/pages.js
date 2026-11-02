@@ -19,32 +19,52 @@ export const noticeFor = code => (Object.hasOwn(NOTICES, code) ? NOTICES[code] :
 // Overview -------------------------------------------------------------------
 
 export function overviewPage(view, data) {
-  const card = (label, value, note, word) => html`<div class="card"><div class="label">${label}</div><div class="metric ${word ? 'word' : ''}">${value}</div><div class="note">${note}</div></div>`;
+  const card = (label, value, note, word, href) => html`<a class="card metric-card" href="${href}"><div class="label">${label}<span class="card-arrow" aria-hidden="true"></span></div><div class="metric ${word ? 'word' : ''}">${value}</div><div class="note">${note}</div></a>`;
   const monitored = data.active_checks === 0 ? ['Not set up', 'No monitoring checks are enabled', true]
     : data.checks_with_results === 0 ? ['Unknown', `${data.active_checks} enabled, none has run yet`, true]
-    : [`${data.checks_with_results} of ${data.active_checks}`, 'Checks with at least one real result', false];
+    : [`${data.checks_with_results} of ${data.active_checks}`, 'Enabled checks with at least one recorded result', false];
   return shell({
     title: 'Overview', active: '/', view,
     actions: can(view.staff, 'website.write') ? html`<a class="btn" href="/websites/new">Add website</a>` : '',
     body: html`
-    <div class="cards">
-      ${card('Managed websites', data.websites, data.websites ? 'Not offboarded, in clients you can access' : 'None added yet')}
-      ${card('Open maintenance', data.open_tasks, data.overdue_tasks ? `${data.overdue_tasks} overdue` : 'None overdue')}
-      ${card('Monitoring', monitored[0], monitored[1], monitored[2])}
-      ${card('Security reviews', data.security_reviews || 'None recorded', data.security_reviews ? 'Reviews on record' : 'No review has been recorded. This is not a clean result.', !data.security_reviews)}
-      ${card('Backup sources', data.backup_sources || 'None recorded', data.backup_sources ? 'See Backups for restore evidence' : 'Backup coverage is unknown.', !data.backup_sources)}
-      ${card('Platform connections', data.connected_platforms, 'Passed their latest connection check')}
-      ${card('Open incidents', data.open_incidents, 'Open now, from checks that ran')}
-      ${card('Open findings', data.open_findings, 'Automated and manual')}
+    <section class="workspace-intro" aria-labelledby="workspace-title"><div><p class="eyebrow">Website operations</p><h2 id="workspace-title">Your website workspace</h2><p class="muted">Inventory, work and recorded checks for the clients you can access.</p></div><a class="btn quiet" href="/maintenance">View maintenance</a></section>
+    <div class="cards primary-metrics">
+      ${card('Managed websites', data.websites, data.websites ? 'Active and paused websites in your scope' : 'None added yet', false, '/websites')}
+      ${card('Open maintenance', data.open_tasks, data.overdue_tasks ? `${data.overdue_tasks} overdue` : 'None overdue', false, '/maintenance')}
+      ${card('Open findings', data.open_findings, 'Recorded findings awaiting resolution', false, '/security')}
+      ${card('Open incidents', data.open_incidents, 'From monitoring checks that ran', false, '/monitoring')}
+    </div>
+    <div class="cards coverage-metrics">
+      ${card('Monitoring', monitored[0], monitored[1], monitored[2], '/monitoring')}
+      ${card('Backup sources', data.backup_sources || 'None recorded', data.backup_sources ? `${data.websites_with_backup_sources} of ${data.websites} managed websites have a source. Restore evidence is separate.` : 'Backup coverage is unknown.', !data.backup_sources, '/backups')}
+      ${card('Platform connections', data.connected_platforms, `${data.total_platforms} configured; count reflects the latest check, not live availability`, false, '/integrations')}
+      ${card('Security reviews', data.security_reviews || 'None recorded', data.security_reviews ? 'Reviews on record; findings and scope remain important' : 'No review has been recorded. This is not a clean result.', !data.security_reviews, '/security')}
     </div>
     <div class="split">
-      <section class="panel" aria-labelledby="reminders"><div class="panel-head"><div><h2 id="reminders">Due within 7 days</h2><p class="muted">Overdue and upcoming work from your records.</p></div></div>
-        ${data.reminders.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Due</th><th>Item</th><th>Website</th></tr></thead><tbody>
-          ${data.reminders.map(item => html`<tr><td>${item.due_on}${item.due_on < today() ? html` ${tag('Overdue', 'bad')}` : ''}</td><td>${item.title}</td><td><a href="/websites/${item.website_id}">${item.website_name}</a></td></tr>`)}
+      <section class="panel" aria-labelledby="reminders"><div class="panel-head"><div><p class="section-kicker">Work queue</p><h2 id="reminders">Due within 7 days</h2><p class="muted">Overdue and upcoming work from your records.</p></div><a href="/maintenance">All maintenance</a></div>
+        ${data.tasks_awaiting_approval ? html`<p class="approval-note">${tag(`${data.tasks_awaiting_approval} awaiting approval`, 'warn')} A second person must approve these changes.</p>` : ''}
+        ${data.reminders.length ? html`<div class="table-wrap" tabindex="0" role="region" aria-label="Upcoming work"><table><thead><tr><th>Due</th><th>Item</th><th>Website</th></tr></thead><tbody>
+          ${data.reminders.map(item => html`<tr><td>${item.due_on}${item.due_on < today() ? html` ${tag('Overdue', 'bad')}` : ''}</td><td>${item.title}</td><td><a href="/websites/${item.website_id}#maintenance">${item.website_name}</a></td></tr>`)}
         </tbody></table></div>` : empty('Nothing due', 'No tasks, schedules or reviews fall due in the next 7 days.')}
       </section>
+      <section class="panel" aria-labelledby="dashboard-notifications"><div class="panel-head"><div><p class="section-kicker">Your inbox</p><h2 id="dashboard-notifications">Unread notifications</h2></div><a href="/notifications">View notifications</a></div>
+        ${data.notifications.length ? html`<ul class="feed">${data.notifications.map(item => html`<li><span class="feed-marker ${['critical','high','warning'].includes(item.severity) ? 'attention' : ''}" aria-hidden="true"></span><div><a href="/notifications">${item.title}</a><div class="note">${dateTime(item.created_at)}</div></div></li>`)}</ul>` : empty('You’re up to date', 'No unread notifications for your account.')}
+      </section>
+    </div>
+    <div class="split">
+      <section class="panel" aria-labelledby="recent-activity"><div class="panel-head"><div><p class="section-kicker">Recorded work</p><h2 id="recent-activity">Recent activity</h2><p class="muted">Service history for websites in your scope.</p></div></div>
+        ${data.activity.length ? html`<ul class="feed">${data.activity.map(item => html`<li><span class="feed-marker" aria-hidden="true"></span><div><p>${item.summary}</p><a href="/websites/${item.website_id}#history">${item.website_name}</a><div class="note">${dateTime(item.performed_at)} · ${item.source === 'system' ? 'System record' : 'Recorded by staff'}</div></div></li>`)}</ul>` : empty('No activity recorded', 'Completed work will appear here when it is saved to service history.')}
+      </section>
+      <section class="panel" aria-labelledby="dashboard-incidents"><div class="panel-head"><div><p class="section-kicker">Attention needed</p><h2 id="dashboard-incidents">Monitoring incidents</h2></div><a href="/monitoring">All incidents</a></div>
+        ${data.incidents.length ? html`<ul class="feed">${data.incidents.map(item => html`<li><span class="feed-marker attention" aria-hidden="true"></span><div><a href="/websites/${item.website_id}#monitoring">${item.website_name}</a><p>${item.kind === 'certificate' ? 'Certificate' : 'Availability'} incident</p><div class="note">Opened ${dateTime(item.opened_at)}</div></div></li>`)}</ul>` : empty('No open incidents recorded', 'This is not a claim of availability. Websites without checks remain unknown.')}
+      </section>
+    </div>
+    <div class="split">
+      <section class="panel" aria-labelledby="dashboard-platforms"><div class="panel-head"><div><h2 id="dashboard-platforms">Platform connection status</h2><p class="muted">Saved connection records, not live checks.</p></div><a href="/integrations">Capabilities</a></div>
+        ${data.platforms.length ? html`<ul class="feed">${data.platforms.map(item => html`<li><span class="feed-marker" aria-hidden="true"></span><div><a href="/websites/${item.website_id}#connection">${item.website_name}</a><p>${platformLabel(item.adapter_key)} ${statusTag(item.status)}</p><div class="note">${item.last_checked_at ? `Last checked ${dateTime(item.last_checked_at)}` : 'No check recorded'}${item.last_error_code ? ` · ${ERROR_MESSAGES[item.last_error_code] ?? 'Check failed'}` : ''}</div></div></li>`)}</ul>` : empty('No platform connections', 'Inventory and manual maintenance work without a connected CMS.')}
+      </section>
       <section class="panel" aria-labelledby="certs"><div class="panel-head"><div><h2 id="certs">Certificates expiring within 30 days</h2><p class="muted">Only from certificate checks that have actually run.</p></div></div>
-        ${data.certificates.length ? html`<div class="panel-body"><ul class="plain">${data.certificates.map(item => html`<li><a href="/websites/${item.website_id}">${item.website_name}</a>: ${dateTime(item.tls_valid_to)}</li>`)}</ul></div>`
+        ${data.certificates.length ? html`<ul class="feed">${data.certificates.map(item => html`<li><span class="feed-marker attention" aria-hidden="true"></span><div><a href="/websites/${item.website_id}#monitoring">${item.website_name}</a><div class="note">${dateTime(item.tls_valid_to)}</div></div></li>`)}</ul>`
           : empty('None known', 'This covers only websites with a completed certificate check.')}
       </section>
     </div>`
@@ -100,7 +120,7 @@ function capabilityList(platform) {
 function connectionSection(view, website, connections, operations, credentials, config) {
   const adapter = getAdapter(website.cms_platform);
   const canManage = can(view.staff, 'connection.write');
-  const connection = connections[0];
+  const connection = connections.find(item => item.adapter_key === adapter?.key);
   if (!adapter) {
     return html`<section class="panel" id="connection"><div class="panel-head"><div><h2>Platform connection</h2><p class="muted">Other CMS has no adapter, so this site uses monitoring and manual records.</p></div></div><div class="panel-body">${capabilityList(OTHER_PLATFORM)}</div></section>`;
   }
@@ -113,6 +133,7 @@ function connectionSection(view, website, connections, operations, credentials, 
     ${connection ? html`<dl class="facts"><dt>API address</dt><dd>${connection.base_url}</dd><dt>Authentication</dt><dd>${authType?.label ?? connection.auth_type}</dd>
       ${credential !== undefined && canManage ? html`<dt>Credential</dt><dd>${credential ? `Stored ${dateTime(credential.created_at)}` : 'None stored'}</dd>` : ''}
       <dt>Last checked</dt><dd>${connection.last_checked_at ? dateTime(connection.last_checked_at) : 'Never'}</dd>
+      <dt>Last successful connection</dt><dd>${connection.last_successful_at ? dateTime(connection.last_successful_at) : 'No successful check recorded'}</dd>
       ${connection.last_error_code ? html`<dt>Last problem</dt><dd>${ERROR_MESSAGES[connection.last_error_code] ?? connection.last_error_code}</dd>` : ''}</dl>
       ${snapshot ? snapshotView(snapshot) : ''}` : html`<p class="muted">Not connected. Connecting is optional, and monitoring and manual records work without it.</p>`}
     </div>
@@ -132,7 +153,7 @@ function connectionSection(view, website, connections, operations, credentials, 
         ${postForm(`/connections/${connection.id}/credential`, view, html`${fields(authType.fields.map(field => ({ name: field.name, label: field.label, type: 'password', required: true })))}${submit('Encrypt and store')}`)}
         ${credential ? postForm(`/connections/${connection.id}/credential/revoke`, view, submit('Revoke stored credential', 'btn danger')) : ''}`
         : html`<p class="muted">Credential storage is turned off in this environment. No credential can be entered or stored here.</p>`}</details>` : ''}
-    ${connection && adapter.operations.length ? operationsSection(view, connection, adapter, operations, config) : ''}
+    ${connection && adapter.operations.length ? operationsSection(view, connection, adapter, operations.filter(item => item.connection_id === connection.id), config) : ''}
     <details><summary>What this platform supports</summary><div>${capabilityList(adapter)}</div>
       <p class="note">Built from official documentation and tested against simulated responses, not a live site. <a href="${adapter.docsUrl}" rel="noreferrer noopener">Platform API documentation</a>.</p></details>
   </section>`;
@@ -176,7 +197,7 @@ function operationsSection(view, connection, adapter, operations, config) {
 }
 
 export function websiteDetailPage(view, data) {
-  const { website, tasks, schedules, checks, reviews, sources, runs, history, connections, operations, credentials, assignable, config, state, notice, domains, plans, incidents, windows, uptime, findings, recovery, workLogs } = data;
+  const { website, tasks, schedules, checks, reviews, sources, runs, history, connections, operations, credentials, assignable, config, state, notice, domains, plans, incidents, windows, uptime, findings, recovery, workLogs, restores = [] } = data;
   const writeMaintenance = can(view.staff, 'maintenance.write');
   const assigneeOptions = assignable.map(item => ({ value: item.id, label: item.display_name }));
   const existingKinds = new Set(checks.map(item => item.kind));
@@ -184,14 +205,14 @@ export function websiteDetailPage(view, data) {
     title: website.display_name, active: '/websites', view, notice,
     actions: can(view.staff, 'website.write') ? html`<a class="btn quiet" href="/websites/${website.id}/edit">Edit</a>` : '',
     body: html`${stateBanner(state)}
-    <nav class="subnav" aria-label="On this page">${[['domains', 'Domains'], ['maintenance', 'Maintenance'], ['monitoring', 'Monitoring'], ['connection', 'Connection'], ['security', 'Security'], ['backups', 'Backups'], ['history', 'History'], ['administration', 'Administration']].map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>
+    <nav class="subnav" aria-label="On this page">${[['domains', 'Domains'], ['maintenance', 'Maintenance'], ['monitoring', 'Monitoring'], ['connection', 'Connection'], ['security', 'Security'], ['backups', 'Backups'], ['history', 'History'], ...(can(view.staff, 'website.write') ? [['administration', 'Administration']] : [])].map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>
     ${profileCard(website)}
     ${domainsSection(view, website, domains)}
 
     <section class="panel" id="maintenance"><div class="panel-head"><div><h2>Maintenance</h2><p class="muted">Open work and recurring schedules for this website.</p></div></div>
       ${tasks.length ? taskTable(view, tasks, assigneeOptions, false) : empty('No open tasks', 'Nothing is assigned on this website right now.')}
       ${workLogList(workLogs)}
-      ${schedules.length ? html`<div class="panel-body"><h3>Schedules</h3><ul class="plain">${schedules.map(item => scheduleRow(view, item))}</ul></div>` : ''}
+      ${schedules.length ? html`<div class="panel-body"><h3>Schedules</h3><ul class="plain">${schedules.map(item => scheduleRow(view, item, assigneeOptions, true))}</ul></div>` : ''}
       ${writeMaintenance ? html`<details><summary>Add a task</summary>${postForm('/maintenance/tasks', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">${taskFields(assigneeOptions)}${submit('Add task')}`)}</details>
       <details><summary>Add a schedule</summary>${postForm('/maintenance/schedules', view, html`<input type="hidden" name="website_id" value="${website.id}"><input type="hidden" name="_return" value="/websites/${website.id}">${scheduleFields(assigneeOptions)}${submit('Add schedule')}`)}</details>` : ''}
     </section>
@@ -235,6 +256,7 @@ export function websiteDetailPage(view, data) {
           { name: 'checks_performed', label: 'Checks performed', type: 'textarea', required: true },
           { name: 'evidence_ref', label: 'Evidence reference', help: 'Required for a passed test: a ticket, document or file reference.' },
           { name: 'performed_at', label: 'Performed (UTC)', type: 'datetime-local', required: true, value: nowLocal() }])}${submit('Record restore test')}`)}</details>` : ''}` : ''}
+      ${restoreHistory(restores)}
       ${recoverySection(view, website, recovery, runs)}
     </section>
 
@@ -260,13 +282,13 @@ const taskFields = assignees => fields([
   { name: 'stackltr_request_id', label: 'StackLTR service request ID', help: 'Links this task to the request in StackLTR.' }
 ]);
 
-const scheduleFields = assignees => fields([
+const scheduleFields = (assignees, values = {}) => fields([
   { name: 'title', label: 'Recurring work', required: true },
   { name: 'kind', label: 'Type', type: 'select', required: true, value: 'inspection', options: TASK_KINDS },
   { name: 'interval_days', label: 'Repeat every (days)', type: 'number', required: true, value: 30 },
   { name: 'next_due_on', label: 'Next due', type: 'date', required: true },
   { name: 'default_assignee_id', label: 'Default assignee', type: 'select', placeholder: 'Unassigned', options: assignees }
-]);
+], { values });
 
 const reviewFields = () => fields([
   { name: 'scope', label: 'What was reviewed', required: true },
@@ -298,9 +320,11 @@ function taskTable(view, tasks, assignees, showWebsite) {
   </tbody></table></div>`;
 }
 
-const scheduleRow = (view, item) => html`<li><strong>${item.title}</strong> every ${item.interval_days} days, next due ${item.next_due_on}${item.next_due_on < today() ? html` ${tag('Overdue', 'bad')}` : ''}
+const scheduleRow = (view, item, assignees = [], onWebsite = false) => html`<li><strong>${item.title}</strong> ${item.active ? tag('Active','good') : tag('Paused','unknown')} every ${item.interval_days} days, next due ${item.next_due_on}${item.active && item.next_due_on < today() ? html` ${tag('Overdue', 'bad')}` : ''}
   <span class="note">${item.assignee_name ? `Default: ${item.assignee_name}` : 'No default assignee'}</span>
-  ${can(view.staff, 'maintenance.write') ? postForm(`/maintenance/schedules/${item.id}/task`, view, html`<button class="btn quiet" type="submit">Create task</button>`, 'inline') : ''}</li>`;
+  ${can(view.staff, 'maintenance.write') ? html`${item.active ? postForm(`/maintenance/schedules/${item.id}/task`, view, html`<button class="btn quiet" type="submit">Create task</button>`, 'inline') : ''}
+  <details><summary>Edit schedule</summary>${postForm(`/maintenance/schedules/${item.id}/update`,view,html`<input type="hidden" name="_return" value="${onWebsite ? `/websites/${item.website_id}` : '/maintenance'}">${scheduleFields(assignees,item)}
+    ${fields([{name:'active',label:'Schedule status',type:'select',required:true,value:item.active ? 'on' : 'off',options:[{value:'on',label:'Active'},{value:'off',label:'Paused'}]}])}${submit('Save schedule')}`)}</details>` : ''}</li>`;
 
 export function checkTable(checks, showWebsite) {
   return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable table"><table><thead><tr><th>Check</th>${showWebsite ? html`<th>Website</th>` : ''}<th>Latest result</th><th>Details</th><th>Checked</th></tr></thead><tbody>
@@ -324,6 +348,15 @@ function sourceTable(sources, showWebsite) {
       <td>${source.latest_run_status ? html`${statusTag(source.latest_run_status)}<br><span class="note">${dateTime(source.latest_run_finished_at)}</span>` : html`<span class="muted">None recorded</span>`}</td>
       <td>${recoverabilityTag(source.recoverability)}${source.latest_passed_at ? html`<br><span class="note">Last passed ${dateTime(source.latest_passed_at)}</span>` : ''}</td></tr>`)}
   </tbody></table></div>`;
+}
+
+function restoreHistory(restores, showWebsite = false) {
+  return html`<section class="panel-body" aria-label="Restore verification history"><h3>Restore verification history</h3>
+    ${restores.length ? html`<ul class="plain">${restores.map(item => html`<li>${statusTag(item.outcome)} <strong>${item.source_label}</strong>
+      ${showWebsite ? html`<a href="/websites/${item.website_id}#backups">${item.website_name}</a>` : ''}
+      <div class="note">${dateTime(item.performed_at)} · ${item.target_environment} · Recorded by ${item.performed_by_name}</div>
+      <p>${item.checks_performed}</p>${item.evidence_ref ? html`<p class="note">Evidence: ${item.evidence_ref}</p>` : ''}</li>`)}</ul>`
+      : html`<p class="muted">No restore tests recorded. Backup success alone does not verify recovery.</p>`}</section>`;
 }
 
 // Clients --------------------------------------------------------------------
@@ -376,16 +409,16 @@ export function maintenancePage(view, { tasks, schedules, websites, assignable, 
         ${fields([{ name: 'website_id', label: 'Website', type: 'select', required: true, placeholder: 'Choose a website', options: websites.map(item => ({ value: item.id, label: `${item.display_name} (${item.client_name})` })) }])}${taskFields(assignees)}${submit('Add task')}`)}</details>` : ''}
     </section>
     <section class="panel"><div class="panel-head"><div><h2>Schedules</h2><p class="muted">Recurring work. Staff create the task when it comes due.</p></div></div>
-      ${schedules.length ? html`<div class="panel-body"><ul class="plain">${schedules.map(item => html`${scheduleRow(view, item)}`)}</ul></div>` : empty('No schedules', 'Add one from a website page.')}
+      ${schedules.length ? html`<div class="panel-body"><ul class="plain">${schedules.map(item => html`${scheduleRow(view, item, assignees)}`)}</ul></div>` : empty('No schedules', 'Add one from a website page.')}
     </section>`
   });
 }
 
-export function backupsPage(view, { sources }) {
+export function backupsPage(view, { sources, restores = [] }) {
   return shell({
     title: 'Backups', active: '/backups', view,
     notice: { title: 'A backup is not proven until it is restored.', text: ' Only a passed restore test with evidence from the last 90 days shows as verified.' },
-    body: html`<section class="panel">${sources.length ? sourceTable(sources, true) : empty('No backup sources recorded', 'Backup coverage is unknown. Add a source from a website page.')}</section>`
+    body: html`<section class="panel">${sources.length ? sourceTable(sources, true) : empty('No backup sources recorded', 'Backup coverage is unknown. Add a source from a website page.')}</section><section class="panel">${restoreHistory(restores,true)}</section>`
   });
 }
 

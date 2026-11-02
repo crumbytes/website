@@ -102,6 +102,10 @@ export const schemas = {
     next_due_on: dateOnly,
     default_assignee_id: optionalUuid
   }),
+  scheduleUpdate: z.object({
+    title: text(1,160), kind: taskKind, interval_days: z.coerce.number().int().min(1).max(366),
+    next_due_on: dateOnly, default_assignee_id: optionalUuid, active: flag
+  }),
   history: z.object({
     website_id: z.string().uuid(),
     kind: z.enum(['maintenance', 'security', 'backup', 'restore', 'connection', 'other']),

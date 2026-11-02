@@ -83,3 +83,12 @@ Everything else, such as recording restores or approving operations, is availabl
 | `risk.level: "unassessed"` | Not assessed. **Never low risk.** |
 | `risk.level: "none_open"` | No open findings, not secure. |
 | Finding `source` | Always show whether it was automated or manual. |
+
+
+## Sprint 3 integration additions
+
+The server-rendered frontend remains compatible with the JSON contracts above. Connection records additionally expose nullable `last_successful_at`, derived only from successful saved snapshots. No credentials are returned.
+
+The authenticated form action `POST /maintenance/schedules/:id/update` supports title, kind, interval_days, next_due_on, default_assignee_id and active. It requires the existing CSRF token/origin checks and maintenance.write permission, validates assignment against the existing client, and cannot move a schedule to another client or website. Management screens request inactive schedules as well so staff can pause/resume them; existing service callers still default to active-only. The new restore-history display and overview summaries use scoped server-side projections, not new client-side fetches.
+
+Notification lists and overview/history content follow current client assignments; client-bound notification content is hidden immediately after access is removed. See [Sprint 3 release report](sprint3-release.md) for validation and deployment gates.

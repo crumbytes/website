@@ -34,18 +34,17 @@ export function shell({ title, active, view, body, notice, actions }) {
 <body><a class="skip" href="#main">Skip to content</a><div class="app">
 <aside class="sidebar" aria-label="Hub navigation">
   <a class="brand" href="/"><span class="brandmark" aria-hidden="true">C</span><span><strong>CrumByte</strong><small>Website hub</small></span></a>
-  <div><p class="nav-label">Workspace</p><nav class="nav" aria-label="Sections">
+  <div><p class="nav-label">Manage your workspace</p><nav class="nav" aria-label="Sections">
     ${NAV.filter(item => can(staff, item[2])).map(([href, label]) =>
-      html`<a href="${href}" ${href === active ? raw('aria-current="page"') : ''}>${label}</a>`)}
+      html`<a href="${href}" ${href === active ? raw('aria-current="page"') : ''}><span class="nav-symbol" aria-hidden="true">${({'/':'◫','/websites':'▦','/clients':'◇','/maintenance':'✓','/monitoring':'⌁','/security':'◈','/backups':'▣','/hosting':'▤','/integrations':'⊞','/staff':'○','/audit':'≡'})[href]}</span>${label}</a>`)}
     <a href="/notifications" ${active === '/notifications' ? raw('aria-current="page"') : ''}>Notifications${unread ? html` <span class="tag warn">${unread}<span class="skip"> unread</span></span>` : ''}</a>
     <a href="/account" ${active === '/account' ? raw('aria-current="page"') : ''}>Your account</a>
   </nav></div>
   <div class="who"><div><strong>${staff.display_name}</strong>${roleLabel(staff.role)}</div>
     <form method="post" action="/logout">${csrf(csrfToken)}<button class="btn quiet" type="submit">Sign out</button></form></div>
 </aside>
-<main id="main">
-  ${ENVIRONMENT_NOTE[environment] ? html`<div class="banner warn" role="note"><strong>${ENVIRONMENT_NOTE[environment]}</strong></div>` : ''}
-  <header class="topbar"><div><div class="eyebrow">CrumByte Technologies / Internal</div><h1>${title}</h1></div>
+<main id="main" tabindex="-1">
+  <header class="topbar"><div><div class="workspace-path">CrumByte Technologies <span aria-hidden="true">/</span> Internal workspace</div>${ENVIRONMENT_NOTE[environment] ? html`<span class="environment-note">${ENVIRONMENT_NOTE[environment]}</span>` : ''}<h1>${title}</h1></div>
     ${actions ? html`<div>${actions}</div>` : ''}</header>
   ${notice ? html`<div class="banner ${notice.kind ?? ''}" role="status"><strong>${notice.title}</strong>${notice.text ?? ''}</div>` : ''}
   ${body}
@@ -136,7 +135,7 @@ export const statusTag = status => {
     open: '', in_progress: '', blocked: 'warn', completed: 'good', cancelled: 'unknown',
     active: 'good', inactive: 'unknown', paused: 'warn', offboarded: 'unknown', disabled: 'unknown',
     not_connected: 'unknown', connected: 'good', partial: 'warn', failed: 'bad',
-    requested: 'warn', approved: '', rejected: 'unknown', executed: 'good',
+    requested: 'warn', approved: '', executing: 'warn', rejected: 'unknown', executed: 'good',
     succeeded: 'good', unknown: 'unknown', passed: 'good',
     no_findings: 'good', findings: 'bad', incomplete: 'warn',
     low: 'unknown', normal: '', high: 'warn', urgent: 'bad'

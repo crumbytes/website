@@ -2,7 +2,8 @@
   "git": {
     "deploymentEnabled": {
       "feat/website-hub-foundation-20261101": false,
-      "codex/hub-staging-review": false
+      "codex/hub-staging-review": false,
+      "codex/hub-frontend-integration": false
     }
   },
   "cleanUrls": true,

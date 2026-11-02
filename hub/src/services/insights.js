@@ -198,12 +198,12 @@ export async function createRemediationTask(ctx, findingId) {
 export async function listNotifications(ctx, { unreadOnly = false } = {}) {
   return asStaff(ctx, async tx => (await tx.query(
     `select id, kind, severity, title, body, link_path, read_at, created_at from hub.notifications
-     where staff_id = $1 and (not $2::boolean or read_at is null) order by created_at desc limit 200`, [ctx.staff.id, unreadOnly])).rows);
+     where staff_id = $1 and (client_account_id is null or hub.can_access_client(client_account_id)) and (not $2::boolean or read_at is null) order by created_at desc limit 200`, [ctx.staff.id, unreadOnly])).rows);
 }
 
 export async function unreadCount(ctx) {
   return asStaff(ctx, async tx => one(await tx.query(
-    `select count(*)::int as n from hub.notifications where staff_id = $1 and read_at is null`, [ctx.staff.id])).n);
+    `select count(*)::int as n from hub.notifications where staff_id = $1 and read_at is null and (client_account_id is null or hub.can_access_client(client_account_id))`, [ctx.staff.id])).n);
 }
 
 export async function markNotificationsRead(ctx, id) {

@@ -45,12 +45,12 @@ async function addClient(page, name) {
   return page.url().split('?')[0];
 }
 
-async function addWebsite(page, client, name, slug) {
+async function addWebsite(page, client, name, slug, platform = 'wordpress') {
   await page.goto('/websites/new');
   await page.getByLabel('Client', { exact: true }).selectOption({ label: client });
   await page.getByLabel('Website name').fill(name);
   await page.getByLabel('Website address').fill(`https://${slug}-${unique}.example.test`);
-  await page.getByLabel('CMS platform').selectOption('wordpress');
+  await page.getByLabel('CMS platform').selectOption(platform);
   await page.getByRole('button', { name: 'Add website' }).click();
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
   return page.url().split('?')[0];
@@ -170,6 +170,7 @@ test('a backup never reads as recoverable until a restore test passes', async ({
   await retry.getByLabel('Evidence reference').fill('DOC-1');
   await retry.getByRole('button', { name: 'Record restore test' }).click();
   await expect(page.locator('#backups')).toContainText('Restore verified with evidence');
+  await expect(page.getByRole('region', {name:'Restore verification history'})).toContainText('DOC-1');
 });
 
 test('credential entry is impossible in development, and the page runs no scripts', async ({ page }) => {
@@ -284,4 +285,46 @@ test('maintenance changes require another staff member to approve them',async({p
   await signIn(page,'Local Owner');await page.goto(siteAUrl);
   await page.getByRole('row',{name:/Synthetic approval task/}).getByRole('button',{name:'Approve change',exact:true}).click();
   await expect(page.getByRole('row',{name:/Synthetic approval task/})).toContainText('Approved');
+});
+
+test('recurring schedule edits preserve assignment and support pause and resume',async({page})=>{
+ await signIn(page,'Local Owner');await page.goto(siteAUrl);
+ await page.getByText('Add a schedule',{exact:true}).click();
+ const add=page.locator('form[action="/maintenance/schedules"]');
+ await add.getByLabel('Recurring work').fill('Browser recurring schedule');
+ await add.getByLabel('Next due').fill(new Date(Date.now()+2*86400000).toISOString().slice(0,10));
+ await add.getByLabel('Default assignee').selectOption({label:'Local Technician'});
+ await add.getByRole('button',{name:'Add schedule',exact:true}).click();
+ const row=page.locator('#maintenance li').filter({hasText:'Browser recurring schedule'});
+ await row.getByText('Edit schedule',{exact:true}).click();
+ let edit=row.locator('form[action$="/update"]');await edit.getByLabel('Repeat every (days)').fill('14');
+ await edit.getByLabel('Schedule status').selectOption('off');await edit.getByRole('button',{name:'Save schedule',exact:true}).click();
+ await expect(row).toContainText('Paused');await expect(row).toContainText('every 14 days');await expect(row.getByRole('button',{name:'Create task',exact:true})).toHaveCount(0);
+ await row.getByText('Edit schedule',{exact:true}).click();edit=row.locator('form[action$="/update"]');
+ await edit.getByLabel('Schedule status').selectOption('on');await edit.getByRole('button',{name:'Save schedule',exact:true}).click();
+ await expect(row).toContainText('Default: Local Technician');await expect(row.getByRole('button',{name:'Create task',exact:true})).toBeVisible();
+});
+
+test('all five CMS interfaces expose capabilities and honest connection history without secrets',async({page})=>{
+ await signIn(page,'Local Owner');
+ for(const [key,label] of [['wordpress','WordPress'],['shopify','Shopify'],['wix','Wix'],['squarespace','Squarespace'],['joomla','Joomla']]){
+  await addWebsite(page,CLIENT_A,`Browser ${label} interface ${unique}`,'ui-'+key,key);
+  await page.getByText('Connect '+label,{exact:true}).click();
+  const form=page.locator('form[action$="/connections"]');
+  if(key==='shopify')await form.getByLabel('Site address').fill('https://synthetic.myshopify.com');
+  if(key==='wix')await form.getByLabel('Wix site ID',{exact:true}).fill('11111111-1111-4111-8111-111111111111');
+  await form.getByRole('button',{name:'Create connection',exact:true}).click();
+  const panel=page.locator('#connection');await expect(panel).toContainText('No successful check recorded');
+  await panel.getByText('What this platform supports',{exact:true}).click();
+  await expect(panel).toContainText('not a live site');await expect(panel.locator('input[type=password]')).toHaveCount(0);
+ }
+});
+
+test('overview links recorded activity and exposes actionable workspace navigation',async({page})=>{
+ await signIn(page,'Local Owner');
+ await expect(page.getByRole('heading',{name:'Recent activity',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Unread notifications',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Platform connection status',exact:true})).toBeVisible();
+ await expect(page.locator('.metric-card[href="/backups"]')).toContainText('Restore evidence is separate');
+ await page.locator('.metric-card[href="/websites"]').click();await expect(page.getByRole('heading',{level:1,name:'Client websites'})).toBeVisible();
 });
