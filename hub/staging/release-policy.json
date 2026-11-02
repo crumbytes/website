@@ -28,5 +28,8 @@
   "database_plan_preference": "Free only after account-level zero-recurring-cost eligibility verification",
   "protected_neon_project": "frosty-union-75655676",
   "database_provider_account_verified": false,
-  "free_tier_security_compatible": false
+  "free_tier_security_compatible": false,
+  "database_organization_owner_confirmed": "org-winter-breeze-07874558",
+  "identity_provider_candidate": "ZITADEL Cloud Free or verified existing licensed compatible MFA provider",
+  "identity_provider_account_verified": false
 }
