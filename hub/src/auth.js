@@ -89,6 +89,8 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
         } catch {
           throw new LoginDenied('invalid_id_token');
         }
+        if ((Array.isArray(claims.aud) && claims.aud.length > 1 && !claims.azp) ||
+            (claims.azp !== undefined && claims.azp !== oidc.clientId)) throw new LoginDenied('authorized_party_mismatch');
         if (claims.nonce !== pending.nonce) throw new LoginDenied('nonce_mismatch');
         if (oidc.requiredAmr && !(Array.isArray(claims.amr) && claims.amr.includes(oidc.requiredAmr))) {
           throw new LoginDenied('mfa_required');

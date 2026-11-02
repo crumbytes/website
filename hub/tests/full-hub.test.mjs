@@ -634,7 +634,7 @@ test('logs are structured, redacted and leave out paths with IDs', async () => {
 });
 
 test('staging and production are configured strictly, and staging is marked', async () => {
-  const base = { HUB_BASE_URL: 'https://hub-staging.example.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', DATABASE_URL: 'postgres://u@db.test/x', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for' };
+  const base = { HUB_BASE_URL: 'https://hub-staging.example.test', HUB_OIDC_ISSUER: ISSUER, HUB_OIDC_CLIENT_ID: 'x', DATABASE_URL: 'postgres://u@db.test/x', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for', HUB_OIDC_REQUIRED_AMR: 'mfa' };
   const staging = loadConfig({ ...base, HUB_ENV: 'staging' });
   assert.equal(staging.isDev, false);
   assert.equal(staging.session.secure, true);

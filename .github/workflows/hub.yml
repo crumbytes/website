@@ -5,11 +5,17 @@ on:
     paths:
       - 'hub/**'
       - '.github/workflows/hub.yml'
+      - '.vercelignore'
+      - 'vercel.json'
+      - 'scripts/check-seo.py'
   push:
     branches: [main]
     paths:
       - 'hub/**'
       - '.github/workflows/hub.yml'
+      - '.vercelignore'
+      - 'vercel.json'
+      - 'scripts/check-seo.py'
 
 permissions:
   contents: read
@@ -39,6 +45,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: hub/package-lock.json
+      - name: Marketing site regression checks
+        working-directory: .
+        run: |
+          python3 scripts/check-seo.py
+          node --test tests/contact.test.mjs
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
