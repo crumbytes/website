@@ -217,6 +217,7 @@ export const schemas = {
   operationRequest: z.object({
     connection_id: z.string().uuid(),
     operation_key: text(1, 60),
+    customer_authorization_ref: text(3,500),
     reason: text(5, 1000)
   })
 };

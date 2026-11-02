@@ -33,9 +33,9 @@
   "identity_provider_candidate": "ZITADEL Cloud Free or verified existing licensed compatible MFA provider",
   "identity_provider_account_verified": false,
   "reviewed_application_trees": {
-    "hub/src": "659231d69094031727c3bcbe861bf6ffc2ff5d37",
+    "hub/src": "91b03a2cd1881215b526a242dda2da4367b1a039",
     "hub/api": "b127b9ad2a17a9795912a67509158ee7a000abd6",
-    "hub/db": "67b9389a6e9e745ac71e0be44c2e7e2b431c96f7"
+    "hub/db": "4d94ea7417e0129df4078606e78cd591545a5606"
   },
   "development_start": "7ba168ce57e9bf755741b05c93e5c0271d471db0",
   "migration_files": 5,

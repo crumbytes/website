@@ -32,7 +32,7 @@ try {
  const ctx={db,staff:{id:ownerId,role:'owner'},vault,http,operationsEnabled:true,requestId:'synthetic-pg-security'};
  const connection=await connections.createConnection(ctx,site,{adapter_key:'wordpress',auth_type:'application_password',base_url:'https://synthetic.example.test'});
  await connections.storeCredential(ctx,connection.id,{username:'synthetic',application_password:'not-real'});
- const operation=await connections.requestOperation({...ctx,staff:{id:techId,role:'technician'}},{connection_id:connection.id,operation_key:'plugin.set_status',reason:'Synthetic concurrency check',plugin:'a/a',status:'inactive'});
+ const operation=await connections.requestOperation({...ctx,staff:{id:techId,role:'technician'}},{connection_id:connection.id,operation_key:'plugin.set_status',customer_authorization_ref:'synthetic-consent',reason:'Synthetic concurrency check',plugin:'a/a',status:'inactive'});
  await connections.decideOperation(ctx,operation.id,'approved');
  const winning=connections.executeOperation(ctx,operation.id);
  try {

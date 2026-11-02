@@ -82,3 +82,7 @@ grant select,insert,update on hub.portal_history_shares to hub_app;
 create policy share_read on hub.portal_history_shares for select to hub_app using(hub.can_access_client(client_account_id));
 create policy share_write on hub.portal_history_shares for insert to hub_app with check(hub.has_role('owner','admin','technician') and shared_by=hub.current_staff_id() and exists(select 1 from hub.service_history h where h.id=history_id and h.client_account_id=portal_history_shares.client_account_id));
 create policy share_update on hub.portal_history_shares for update to hub_app using(hub.has_role('owner','admin','technician') and hub.can_access_client(client_account_id)) with check(hub.can_access_client(client_account_id) and shared_by=hub.current_staff_id() and exists(select 1 from hub.service_history h where h.id=history_id and h.client_account_id=portal_history_shares.client_account_id));
+-- Preserve old evidence, but a historical request without consent may never dispatch.
+alter table hub.operation_requests add column customer_authorization_ref text check(length(customer_authorization_ref) between 3 and 500);
+create policy claim_customer_consent on hub.operation_execution_claims as restrictive for insert to hub_app
+ with check(exists(select 1 from hub.operation_requests o where o.id=operation_id and length(o.customer_authorization_ref)>=3 and exists(select 1 from hub.platform_connections c join hub.managed_websites w on w.id=c.website_id where c.id=o.connection_id and w.lifecycle='active')));

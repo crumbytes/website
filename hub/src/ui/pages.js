@@ -190,12 +190,12 @@ function operationsSection(view, connection, adapter, operations, config) {
   ] };
   return html`<details><summary>Approved maintenance operations</summary>
     <p class="muted">A second person must approve each change before it can run.${config.operationsEnabled ? '' : ' Live operations are turned off in this environment, so approved requests cannot run here.'}</p>
-    ${operations.length ? html`<ul class="plain">${operations.map(item => html`<li>${statusTag(item.status)} <strong>${item.operation_key}</strong> <span class="note">${JSON.stringify(item.params)}, requested by ${item.requested_by_name}: ${item.reason}${item.result_code ? `. ${ERROR_MESSAGES[item.result_code] ?? item.result_code}` : ''}</span>
+    ${operations.length ? html`<ul class="plain">${operations.map(item => html`<li>${statusTag(item.status)} <strong>${item.operation_key}</strong> <span class="note">${JSON.stringify(item.params)}, requested by ${item.requested_by_name}: ${item.reason}. Customer authorization: ${item.customer_authorization_ref??'Not recorded; execution blocked'}${item.result_code ? `. ${ERROR_MESSAGES[item.result_code] ?? item.result_code}` : ''}</span>
       ${item.status === 'requested' && canDecide ? html`<div>${item.requested_by === view.staff.id ? '' : postForm(`/operations/${item.id}/approve`, view, html`<button class="btn quiet" type="submit">Approve</button>`, 'inline')} ${postForm(`/operations/${item.id}/reject`, view, html`<button class="btn quiet" type="submit">Reject</button>`, 'inline')}</div>` : ''}
       ${item.status === 'approved' && canDecide && config.operationsEnabled ? postForm(`/operations/${item.id}/execute`, view, html`<button class="btn" type="submit">Run now</button>`, 'inline') : ''}</li>`)}</ul>` : ''}
     ${canRequest ? adapter.operations.map(operation => html`<h3>${operation.label}</h3>${postForm('/operations', view, html`
       <input type="hidden" name="connection_id" value="${connection.id}"><input type="hidden" name="operation_key" value="${operation.key}">
-      ${fields([...(paramFields[operation.key] ?? []), { name: 'reason', label: 'Reason', required: true }])}${submit('Request approval', 'btn quiet')}`)}`) : ''}
+      ${fields([...(paramFields[operation.key] ?? []), {name:'customer_authorization_ref',label:'Customer authorization reference',required:true,help:'Approved agreement or customer consent record; never a credential.'}, { name: 'reason', label: 'Reason', required: true }])}${submit('Request approval', 'btn quiet')}`)}`) : ''}
   </details>`;
 }
 

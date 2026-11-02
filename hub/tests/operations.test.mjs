@@ -273,7 +273,8 @@ test('operations need a second person, and run only when approved', async () => 
   await owner.post(`/websites/${site}/connections`, { adapter_key: 'wordpress', auth_type: 'application_password', base_url: 'https://ops.example.test' });
   const connection = (await h.pg.query(`select id from hub.platform_connections where website_id = $1`, [site])).rows[0].id;
   await owner.post(`/connections/${connection}/credential`, { username: 'u', application_password: 'p' });
-  const request = form => tech.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', reason: 'Conflict with checkout', ...form });
+  const request = form => tech.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', customer_authorization_ref:'synthetic-consent', reason: 'Conflict with checkout', ...form });
+  assert.equal((await request({customer_authorization_ref:'',plugin:'a/a',status:'active'})).status,422);
   assert.equal((await request({ plugin: '../../x', status: 'active' })).status, 422);
   assert.equal((await request({ operation_key: 'core.delete_everything', plugin: 'a/a', status: 'active' })).status, 422);
   assert.equal((await request({ plugin: 'akismet/akismet', status: 'inactive' })).status, 303);
@@ -285,6 +286,14 @@ test('operations need a second person, and run only when approved', async () => 
   assert.equal(http.calls.length, 0);
   assert.equal((await owner.post(`/operations/${op}/approve`)).status, 303);
   assert.equal((await owner.post(`/operations/${op}/approve`)).status, 409);
+  await h.pg.query('update hub.operation_requests set customer_authorization_ref=null where id=$1',[op]);
+  assert.equal((await owner.post(`/operations/${op}/execute`)).status,409);
+  await assert.rejects(h.db.as('hub_app',ownerId,tx=>tx.query('insert into hub.operation_execution_claims(operation_id,claim_token,claimed_by) values($1,gen_random_uuid(),$2)',[op,ownerId])),/row-level security/);
+  assert.equal(http.calls.length,0);
+  await h.pg.query("update hub.operation_requests set customer_authorization_ref='synthetic-consent' where id=$1",[op]);
+  await h.pg.query("update hub.managed_websites set lifecycle='paused' where id=$1",[site]);
+  assert.equal((await owner.post(`/operations/${op}/execute`)).status,409);assert.equal(http.calls.length,0);
+  await h.pg.query("update hub.managed_websites set lifecycle='active' where id=$1",[site]);
   assert.equal((await owner.post(`/operations/${op}/execute`)).status, 303);
   assert.equal(new URL(http.calls.at(-1).url).pathname, '/wp-json/wp/v2/plugins/akismet/akismet');
   assert.equal((await h.pg.query(`select status from hub.operation_requests where id = $1`, [op])).rows[0].status, 'executed');
@@ -296,7 +305,7 @@ test('someone cannot approve their own request, at the route or in the database'
   const site = await h.addWebsite(clientId, 'selfapprove', ownerId);
   await owner.post(`/websites/${site}/connections`, { adapter_key: 'wordpress', auth_type: 'application_password', base_url: 'https://self.example.test' });
   const connection = (await h.pg.query(`select id from hub.platform_connections where website_id = $1`, [site])).rows[0].id;
-  await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', reason: 'My own change', plugin: 'a/a', status: 'inactive' });
+  await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', customer_authorization_ref:'synthetic-consent', reason: 'My own change', plugin: 'a/a', status: 'inactive' });
   const op = (await h.pg.query(`select id from hub.operation_requests where connection_id = $1`, [connection])).rows[0].id;
   assert.equal((await owner.post(`/operations/${op}/approve`)).status, 403);
   await assert.rejects(h.db.as('hub_app', ownerId, tx => tx.query(`update hub.operation_requests set status = 'approved', decided_by = $1 where id = $2`, [ownerId, op])), /check constraint/);
@@ -312,7 +321,7 @@ test('live operations stay blocked unless the environment turns them on', async 
   const [o, ad] = await Promise.all(['owner', 'admin'].map(n => off.sessionFor(`${n}@hub.test`)));
   await o.post(`/websites/${site}/connections`, { adapter_key: 'wordpress', auth_type: 'application_password', base_url: 'https://s.example.test' });
   const connection = (await off.pg.query(`select id from hub.platform_connections`)).rows[0].id;
-  await o.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', reason: 'Testing gate', plugin: 'a/a', status: 'inactive' });
+  await o.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', customer_authorization_ref:'synthetic-consent', reason: 'Testing gate', plugin: 'a/a', status: 'inactive' });
   const op = (await off.pg.query(`select id from hub.operation_requests`)).rows[0].id;
   await ad.post(`/operations/${op}/approve`);
   assert.equal((await ad.post(`/operations/${op}/execute`)).status, 503);

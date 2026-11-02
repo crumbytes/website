@@ -15,7 +15,7 @@ async function operationHarness(http) {
   assert.equal((await owner.post(`/websites/${site}/connections`, { adapter_key: 'wordpress', auth_type: 'application_password', base_url: 'https://atomic.example.test' })).status, 303);
   const connection = (await h.pg.query('select id from hub.platform_connections')).rows[0].id;
   assert.equal((await owner.post(`/connections/${connection}/credential`, { username: 'synthetic', application_password: 'synthetic-only' })).status, 303);
-  assert.equal((await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', reason: 'Synthetic atomic operation', plugin: 'a/a', status: 'inactive' })).status, 303);
+  assert.equal((await owner.post('/operations', { connection_id: connection, operation_key: 'plugin.set_status', customer_authorization_ref:'synthetic-consent', reason: 'Synthetic atomic operation', plugin: 'a/a', status: 'inactive' })).status, 303);
   const id = (await h.pg.query('select id from hub.operation_requests')).rows[0].id;
   assert.equal((await admin.post(`/operations/${id}/approve`)).status, 303);
   return { ...h, owner, admin, id };

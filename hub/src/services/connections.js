@@ -202,7 +202,7 @@ export async function runConnectionCheck(ctx, connectionId, { mode = 'full' } = 
 export async function listOperations(ctx, websiteId) {
   requirePermission(ctx.staff, 'connection.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select o.id, o.connection_id, o.operation_key, o.params, o.reason,
+    `select o.id, o.connection_id, o.operation_key, o.params, o.reason, o.customer_authorization_ref,
        case when o.status = 'approved' and exists (select 1 from hub.operation_execution_claims ec where ec.operation_id = o.id)
          then 'executing' else o.status end as status, o.result_code, o.created_at, o.decided_at, o.executed_at,
        o.requested_by, r.display_name as requested_by_name, d.display_name as decided_by_name, c.adapter_key
@@ -222,9 +222,9 @@ export async function requestOperation(ctx, input) {
     if (!operation) throw invalid({ operation_key: 'This platform does not offer that operation.' });
     const params = parse(operation.params, input);
     const row = one(await tx.query(
-      `insert into hub.operation_requests (client_account_id, connection_id, operation_key, params, reason, requested_by)
-       values ($1, $2, $3, $4::jsonb, $5, $6) returning id`,
-      [connection.client_account_id, connection.id, operation.key, JSON.stringify(params), data.reason, ctx.staff.id]));
+      `insert into hub.operation_requests (client_account_id, connection_id, operation_key, params, reason, requested_by,customer_authorization_ref)
+       values ($1, $2, $3, $4::jsonb, $5, $6,$7) returning id`,
+      [connection.client_account_id, connection.id, operation.key, JSON.stringify(params), data.reason, ctx.staff.id,data.customer_authorization_ref]));
     await auditStaff(tx, ctx, 'operation.request', { entityType: 'operation_request', entityId: row.id, clientId: connection.client_account_id, metadata: { operation: operation.key, params } });
     return row;
   });
@@ -253,6 +253,9 @@ export async function executeOperation(ctx, id) {
     const op = one(await tx.query(`select * from hub.operation_requests where id = $1 for update`, [id]));
     if (!op) throw notFound();
     if (op.status !== 'approved') throw conflict('Only an approved request can be run.');
+    if(!op.customer_authorization_ref)throw conflict('Recorded customer authorization is required before execution.');
+    const site=one(await tx.query("select lifecycle from hub.managed_websites w join hub.platform_connections c on c.website_id=w.id where c.id=$1",[op.connection_id]));
+    if(site?.lifecycle!=='active')throw conflict('Only an active customer website may execute maintenance.');
     const connection = await visibleConnection(tx, op.connection_id);
     const claimed = one(await tx.query(
       `insert into hub.operation_execution_claims (operation_id, claim_token, claimed_by) values ($1, $2, $3)

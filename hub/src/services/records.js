@@ -378,8 +378,8 @@ export async function createTaskFromSchedule(ctx, id) {
     const open = one(await tx.query(`select id from hub.maintenance_tasks where schedule_id = $1 and status in ('open', 'in_progress', 'blocked') limit 1`, [id]));
     if (open) throw conflict('This schedule already has an open task.');
     const row = one(await tx.query(
-      `insert into hub.maintenance_tasks (client_account_id, website_id, schedule_id, title, kind, requires_approval, assignee_id, due_on, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      `insert into hub.maintenance_tasks (client_account_id, website_id, schedule_id, title, kind, requires_approval, assignee_id, due_on, created_by,schedule_due_on)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9,$8) returning id`,
       [schedule.client_account_id, schedule.website_id, id, schedule.title, schedule.kind, DISRUPTIVE_KINDS.has(schedule.kind), schedule.default_assignee_id, schedule.due, ctx.staff.id]));
     await auditStaff(tx, ctx, 'task.create', { entityType: 'maintenance_task', entityId: row.id, clientId: schedule.client_account_id, metadata: { title: schedule.title, schedule_id: id } });
     return row;

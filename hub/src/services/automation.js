@@ -13,8 +13,10 @@ export async function enqueueDueMaintenance({db,now=()=>new Date(),limit=50}){
     order by s.next_due_on for update of s skip locked limit $2`,[now(),Math.min(50,limit)])).rows;
   let created=0;
   for(const s of rows){
+   const validAssignee=s.default_assignee_id&&(await tx.query("select 1 from hub.staff_users u where u.id=$1 and u.status='active' and (u.role in ('owner','admin') or (u.role='technician' and exists(select 1 from hub.staff_client_assignments a where a.staff_id=u.id and a.client_account_id=$2)))",[s.default_assignee_id,s.client_account_id])).rows.length;
+   const assignee=validAssignee?s.default_assignee_id:null;
    const r=await tx.query(`insert into hub.maintenance_tasks(client_account_id,website_id,schedule_id,schedule_due_on,title,kind,requires_approval,assignee_id,due_on,created_by)
-    values($1,$2,$3,$4,$5,$6,$7,$8,$4,$9) on conflict do nothing returning id`,[s.client_account_id,s.website_id,s.id,s.due,s.title,s.kind,['software_update','plugin_update'].includes(s.kind),s.default_assignee_id,s.created_by]);
+    values($1,$2,$3,$4,$5,$6,$7,$8,$4,$9) on conflict do nothing returning id`,[s.client_account_id,s.website_id,s.id,s.due,s.title,s.kind,['software_update','plugin_update'].includes(s.kind),assignee,s.created_by]);
    created+=r.rows.length;
    if(r.rows.length)await writeAudit(tx,{action:'schedule.enqueue',clientId:s.client_account_id,entityType:'maintenance_task',entityId:r.rows[0].id});
   }
