@@ -7,7 +7,7 @@ import { createHarness } from './helpers.mjs';
 const base = { HUB_ENV: 'staging', HUB_BASE_URL: 'https://hub-preview.crumbyte.com',
   HUB_OIDC_ISSUER: 'https://identity.example.test/', HUB_OIDC_CLIENT_ID: 'staging',
   DATABASE_URL: 'postgres://hub_runtime@localhost/hub', HUB_TRUSTED_IP_HEADER: 'x-vercel-forwarded-for',
-  HUB_OIDC_REQUIRED_AMR: 'mfa' };
+  HUB_OIDC_REQUIRED_AMR: 'mfa', HUB_STAGING_DATABASE_HOST: 'localhost', HUB_STAGING_DATABASE_NAME: 'hub', HUB_STAGING_OIDC_ISSUER: 'https://identity.example.test/', HUB_STAGING_OIDC_CLIENT_ID: 'staging' };
 
 test('hosted configuration rejects missing client identity, missing MFA, and unsafe origins', () => {
   assert.equal(loadConfig(base).oidc.redirectUri, 'https://hub-preview.crumbyte.com/auth/callback');
@@ -30,7 +30,7 @@ test('internal application files are never served by the Hub router', async () =
     await h.addStaff('owner@hub.test', 'owner');
     const owner = await h.sessionFor('owner@hub.test');
     for (const path of ['/src/auth.js', '/db/migrations/0001_foundation.sql', '/.env.example',
-      '/package-lock.json', '/docs/original-dashboard.html', '/tests/helpers.mjs', '/api/index.js']) {
+      '/package-lock.json', '/.git/config', '/src/db.js', '/db/migrations/0004_execution_and_revocation.sql', '/docs/original-dashboard.html', '/tests/helpers.mjs', '/api/index.js']) {
       const anonymous = await h.app.request(path);
       assert.ok([302, 401].includes(anonymous.status), path);
       const authenticated = await owner.get(path);

@@ -67,6 +67,26 @@ export function loadConfig(env = process.env) {
     // Without it every person shares one sign-in limit and can lock the others out.
     required('HUB_TRUSTED_IP_HEADER');
   }
+  if (environment === 'staging') {
+    // Independent pins catch an accidental production connection/client copy.
+    const databaseHost = required('HUB_STAGING_DATABASE_HOST');
+    const databaseName = required('HUB_STAGING_DATABASE_NAME');
+    const stagingIssuer = required('HUB_STAGING_OIDC_ISSUER');
+    const stagingClient = required('HUB_STAGING_OIDC_CLIENT_ID');
+    try {
+      const db = new URL(env.DATABASE_URL);
+      if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.hostname !== databaseHost ||
+          decodeURIComponent(db.pathname.slice(1)) !== databaseName || decodeURIComponent(db.username) !== 'hub_runtime') {
+        problems.push('Staging DATABASE_URL must match the approved host/database and hub_runtime role');
+      }
+    } catch { problems.push('Staging DATABASE_URL is invalid'); }
+    if (issuer !== stagingIssuer || clientId !== stagingClient) problems.push('Staging OIDC configuration must match the approved staging identity');
+    if (origin === 'https://hub.crumbyte.com') problems.push('Staging cannot use the production Hub origin');
+    for (const name of ['HUB_OUTBOUND_ENABLED', 'HUB_OPERATIONS_ENABLED', 'HUB_CREDENTIAL_STORAGE_ENABLED',
+      'HUB_STACKLTR_ENABLED', 'HUB_EMAIL_ENABLED', 'HUB_R2_ENABLED']) {
+      if (flag(env[name])) problems.push(`${name} must remain disabled in staging`);
+    }
+  }
   if (problems.length) throw new ConfigError(problems.join('; '));
 
   return Object.freeze({

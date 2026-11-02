@@ -23,10 +23,23 @@ export function createDb(driver) {
 
 export function pgDriver(connectionString, Pool) {
   const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 10000 });
+  const checked = new WeakSet();
   return {
     async transaction(fn) {
       const client = await pool.connect();
       try {
+        if (!checked.has(client)) {
+          const { rows: [role] } = await client.query(`select exists (select 1 from pg_roles dangerous where dangerous.rolname in ('hub_auth','hub_app','hub_worker')
+              and (dangerous.rolsuper or dangerous.rolbypassrls or dangerous.rolcreaterole or dangerous.rolcreatedb)) as unsafe_hub_roles,
+            current_user as name, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb,
+            (select pg_has_role(current_user, d.datdba, 'MEMBER') from pg_database d where d.datname=current_database()) as owns_database,
+            exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
+              where n.nspname='hub' and pg_has_role(current_user, c.relowner, 'MEMBER')) as owns_hub_objects
+            from pg_roles r where r.rolname=current_user`);
+          if (!role || role.name !== 'hub_runtime' || role.rolsuper || role.rolbypassrls || role.rolcreaterole ||
+              role.rolcreatedb || role.unsafe_hub_roles || role.owns_database || role.owns_hub_objects) throw new Error('Unsafe Hub runtime database role');
+          checked.add(client);
+        }
         await client.query('begin');
         const result = await fn(client);
         await client.query('commit');

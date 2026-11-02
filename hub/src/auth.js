@@ -139,12 +139,12 @@ export function createAuth({ db, config, fetchImpl = fetch, now = () => new Date
 
   async function openSession(tx, claims, requestId) {
     let staff = one(await tx.query(
-      `select id, status from hub.staff_users where oidc_issuer = $1 and oidc_subject = $2`, [oidc.issuer, claims.sub]));
+      `select id, status from hub.staff_users where oidc_issuer = $1 and oidc_subject = $2 for update`, [oidc.issuer, claims.sub]));
     if (!staff) {
       // First sign-in binds the identity to the record an admin provisioned.
       if (claims.email_verified !== true || typeof claims.email !== 'string') throw new LoginDenied('email_not_verified');
       staff = one(await tx.query(
-        `select id, status from hub.staff_users where email = $1 and oidc_subject is null`, [claims.email.toLowerCase()]));
+        `select id, status from hub.staff_users where email = $1 and oidc_subject is null for update`, [claims.email.toLowerCase()]));
       if (!staff) throw new LoginDenied('not_provisioned');
       await tx.query(`update hub.staff_users set oidc_issuer = $2, oidc_subject = $3 where id = $1`, [staff.id, oidc.issuer, claims.sub]);
     }

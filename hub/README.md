@@ -2,6 +2,8 @@
 
 Internal staff platform for managing customer websites. **Built and tested locally. Not deployed, and never connected to a live site, hosted database or StackLTR.**
 
+- [Sprint 2 deployment approval packet](docs/sprint2-approval.md)
+- [Hosted acceptance procedure](docs/hosted-acceptance.md)
 - [Protected staging readiness review](docs/staging-readiness.md)
 - [Architecture](docs/architecture.md)
 - [Security design](docs/security.md)

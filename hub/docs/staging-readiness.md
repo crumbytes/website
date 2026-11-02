@@ -1,5 +1,7 @@
 # Protected staging readiness review
 
+**Historical Sprint 1 report.** [Sprint 2 approval packet](sprint2-approval.md) supersedes open execution/session findings, migration count, staging variables and account-access observations below.
+
 Review date: 2026-11-01 (Pacific/Honolulu). No deployment, hosted database change, DNS write, paid resource, real customer credential or production StackLTR connection was performed.
 
 ## Decision

@@ -18,7 +18,7 @@ assert.equal(me.rolsuper, false, 'The migration owner must not be a superuser');
 
 const executor = { exec: sql => owner.query(sql), query: (sql, params) => owner.query(sql, params) };
 const ran = await migrate(executor);
-assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql']);
+assert.deepEqual(ran, ['0001_foundation.sql', '0002_access_control.sql', '0003_full_hub.sql', '0004_execution_and_revocation.sql']);
 assert.deepEqual(await migrate(executor), []);
 
 const runtimePassword = 'disposable-ci-password';
