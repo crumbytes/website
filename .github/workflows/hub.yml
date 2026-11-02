@@ -5,11 +5,17 @@ on:
     paths:
       - 'hub/**'
       - '.github/workflows/hub.yml'
+      - '.vercelignore'
+      - 'vercel.json'
+      - 'scripts/check-seo.py'
   push:
     branches: [main]
     paths:
       - 'hub/**'
       - '.github/workflows/hub.yml'
+      - '.vercelignore'
+      - 'vercel.json'
+      - 'scripts/check-seo.py'
 
 permissions:
   contents: read
@@ -39,6 +45,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: hub/package-lock.json
+      - name: Marketing site regression checks
+        working-directory: .
+        run: |
+          python3 scripts/check-seo.py
+          node --test tests/contact.test.mjs
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
@@ -46,7 +57,9 @@ jobs:
         run: |
           psql "postgres://postgres:postgres@localhost:5432/postgres" -c "create role hub_owner login createrole password 'ci-owner'" -c "create database hub owner hub_owner"
       - name: PostgreSQL integration
-        run: node scripts/pg-integration.mjs
+        run: |
+          node scripts/pg-integration.mjs
+          node scripts/pg-security.mjs
         env:
           HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
       - run: npx playwright install --with-deps chromium

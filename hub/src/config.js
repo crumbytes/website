@@ -15,8 +15,8 @@ export function loadConfig(env = process.env) {
   const environment = env.HUB_ENV || 'production';
   if (!['development', 'test', 'staging', 'production'].includes(environment)) problems.push('HUB_ENV is invalid');
   const isDev = DEV_ENVIRONMENTS.has(environment);
-  if (isDev && (env.VERCEL_ENV === 'production' || env.NODE_ENV === 'production')) {
-    problems.push('HUB_ENV cannot be a development value on a production host');
+  if (isDev && (env.VERCEL || env.VERCEL_ENV || env.NODE_ENV === 'production')) {
+    problems.push('HUB_ENV cannot be a development value on a hosted or production environment');
   }
 
   // A production deployment must never be running with staging settings.
@@ -29,6 +29,7 @@ export function loadConfig(env = process.env) {
       const url = new URL(baseUrl);
       origin = url.origin;
       const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+      if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) problems.push('HUB_BASE_URL must be an origin without credentials, path, query or fragment');
       if (url.protocol !== 'https:' && !(isDev && local)) problems.push('HUB_BASE_URL must use https');
     } catch {
       problems.push('HUB_BASE_URL is not a valid URL');
@@ -36,7 +37,18 @@ export function loadConfig(env = process.env) {
   }
 
   const issuer = required('HUB_OIDC_ISSUER');
-  if (issuer && !issuer.startsWith('https://') && !isDev) problems.push('HUB_OIDC_ISSUER must use https');
+  if (issuer) {
+    try {
+      const url = new URL(issuer);
+      const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+      if (url.protocol !== 'https:' && !(isDev && local && url.protocol === 'http:')) problems.push('HUB_OIDC_ISSUER must use https');
+      if (url.username || url.password || url.search || url.hash) problems.push('HUB_OIDC_ISSUER must not contain credentials, query or fragment');
+    } catch {
+      problems.push('HUB_OIDC_ISSUER is not a valid URL');
+    }
+  }
+  const clientId = required('HUB_OIDC_CLIENT_ID');
+  if (!isDev) required('HUB_OIDC_REQUIRED_AMR');
 
   const jobSecret = env.HUB_JOB_SECRET || null;
   if (jobSecret && jobSecret.length < 32) problems.push('HUB_JOB_SECRET must be at least 32 characters');
@@ -55,6 +67,26 @@ export function loadConfig(env = process.env) {
     // Without it every person shares one sign-in limit and can lock the others out.
     required('HUB_TRUSTED_IP_HEADER');
   }
+  if (environment === 'staging') {
+    // Independent pins catch an accidental production connection/client copy.
+    const databaseHost = required('HUB_STAGING_DATABASE_HOST');
+    const databaseName = required('HUB_STAGING_DATABASE_NAME');
+    const stagingIssuer = required('HUB_STAGING_OIDC_ISSUER');
+    const stagingClient = required('HUB_STAGING_OIDC_CLIENT_ID');
+    try {
+      const db = new URL(env.DATABASE_URL);
+      if (!['postgres:', 'postgresql:'].includes(db.protocol) || db.hostname !== databaseHost ||
+          decodeURIComponent(db.pathname.slice(1)) !== databaseName || decodeURIComponent(db.username) !== 'hub_runtime') {
+        problems.push('Staging DATABASE_URL must match the approved host/database and hub_runtime role');
+      }
+    } catch { problems.push('Staging DATABASE_URL is invalid'); }
+    if (issuer !== stagingIssuer || clientId !== stagingClient) problems.push('Staging OIDC configuration must match the approved staging identity');
+    if (origin === 'https://hub.crumbyte.com') problems.push('Staging cannot use the production Hub origin');
+    for (const name of ['HUB_OUTBOUND_ENABLED', 'HUB_OPERATIONS_ENABLED', 'HUB_CREDENTIAL_STORAGE_ENABLED',
+      'HUB_STACKLTR_ENABLED', 'HUB_EMAIL_ENABLED', 'HUB_R2_ENABLED']) {
+      if (flag(env[name])) problems.push(`${name} must remain disabled in staging`);
+    }
+  }
   if (problems.length) throw new ConfigError(problems.join('; '));
 
   return Object.freeze({
@@ -65,7 +97,7 @@ export function loadConfig(env = process.env) {
     databaseUrl: env.DATABASE_URL || null,
     oidc: Object.freeze({
       issuer,
-      clientId: required('HUB_OIDC_CLIENT_ID'),
+      clientId,
       clientSecret: env.HUB_OIDC_CLIENT_SECRET || null,
       redirectUri: `${origin}/auth/callback`,
       requiredAmr: env.HUB_OIDC_REQUIRED_AMR || null

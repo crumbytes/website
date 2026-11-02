@@ -2,3 +2,7 @@
 # project. Its source must never be served from the public marketing site.
 hub/
 .github/
+infra/
+scripts/
+tests/
+README.md

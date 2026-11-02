@@ -1,5 +1,15 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { readFile } from 'node:fs/promises';
+
+const hosted=process.env.HUB_HOSTED_TEST_ORIGIN;
+async function hostedState(name) {
+  if (hosted !== 'https://hub-preview.crumbyte.com' || process.env.HUB_HOSTED_TEST_APPROVED !== hosted || process.env.HUB_HOSTED_MUTATIONS_APPROVED !== hosted) throw new Error('Explicit synthetic hosted acceptance approval required');
+  const file=process.env[name];
+  if (!file?.startsWith('/tmp/')) throw new Error(`${name} requires a protected state file under /tmp`);
+  return JSON.parse(await readFile(file,'utf8'));
+}
+test.beforeEach(async ({context})=>{if(hosted) await context.addCookies((await hostedState('HUB_HOSTED_PROTECTION_STATE')).cookies);});
 
 // Runs the real server and a real browser, against an empty in-memory database.
 // Every record is synthetic, and the two clients are independent test clients.
@@ -13,6 +23,14 @@ let siteBUrl;
 let clientBUrl;
 
 async function signIn(page, name) {
+  if(hosted) {
+    const key=name==='Local Owner'?'HUB_HOSTED_OWNER_STATE':name==='Local Technician'?'HUB_HOSTED_TECH_A_STATE':null;
+    if(!key) throw new Error('Unsupported synthetic staff identity');
+    await page.context().addCookies((await hostedState(key)).cookies);
+    await page.goto(hosted+'/');
+    await expect(page.getByRole('heading',{level:1,name:'Overview'})).toBeVisible();
+    return;
+  }
   await page.goto('/login');
   await page.getByRole('link', { name: 'Sign in with your work account' }).click();
   await page.getByRole('link', { name: new RegExp(name) }).click();
@@ -226,4 +244,44 @@ test('the browser enforces the security headers', async ({ page }) => {
     try { await fetch('/api/v1/me'); return false; } catch { return true; }
   });
   expect(blocked).toBe(true);
+});
+
+
+test('staff edit and archive synthetic inventory while retaining its history', async ({page})=>{
+  await signIn(page,'Local Owner');
+  await page.goto(siteAUrl+'/edit');
+  await page.getByLabel('Website name').fill(SITE_A+' edited');
+  await page.getByRole('button',{name:'Save website',exact:true}).click();
+  await expect(page.getByRole('heading',{level:1,name:SITE_A+' edited'})).toBeVisible();
+  await page.getByText('Archive this website',{exact:true}).click();
+  await page.getByRole('button',{name:'Archive website',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Restore website',exact:true})).toBeVisible();
+  await expect(page.locator('#history')).toContainText('Check contact form');
+  await page.getByRole('button',{name:'Restore website',exact:true}).click();
+});
+
+test('a technician records a synthetic security finding',async({page})=>{
+  await signIn(page,'Local Technician');
+  await page.goto(siteAUrl);
+  await page.getByText('Record a finding',{exact:true}).click();
+  const form=page.locator('form[action="/security/findings"]');
+  await form.getByLabel('Finding',{exact:true}).fill('Synthetic review finding');
+  await form.getByLabel('Risk',{exact:true}).selectOption('medium');
+  await form.getByRole('button',{name:'Record finding',exact:true}).click();
+  await expect(page.locator('main')).toContainText('Synthetic review finding');
+});
+
+test('maintenance changes require another staff member to approve them',async({page})=>{
+  await signIn(page,'Local Technician');await page.goto(siteAUrl);
+  await page.getByText('Add a task',{exact:true}).click();
+  const form=page.locator('form[action="/maintenance/tasks"]').first();
+  await form.getByLabel('Task',{exact:true}).fill('Synthetic approval task');
+  await form.getByLabel('Type',{exact:true}).selectOption('plugin_update');
+  await form.getByRole('button',{name:'Add task',exact:true}).click();
+  const row=page.getByRole('row',{name:/Synthetic approval task/});
+  await expect(row).toContainText('Needs approval');
+  await expect(row.getByRole('button',{name:'Approve change',exact:true})).toHaveCount(0);
+  await signIn(page,'Local Owner');await page.goto(siteAUrl);
+  await page.getByRole('row',{name:/Synthetic approval task/}).getByRole('button',{name:'Approve change',exact:true}).click();
+  await expect(page.getByRole('row',{name:/Synthetic approval task/})).toContainText('Approved');
 });

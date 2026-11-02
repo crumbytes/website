@@ -201,7 +201,9 @@ export async function runConnectionCheck(ctx, connectionId, { mode = 'full' } = 
 export async function listOperations(ctx, websiteId) {
   requirePermission(ctx.staff, 'connection.read');
   return asStaff(ctx, async tx => (await tx.query(
-    `select o.id, o.connection_id, o.operation_key, o.params, o.reason, o.status, o.result_code, o.created_at, o.decided_at, o.executed_at,
+    `select o.id, o.connection_id, o.operation_key, o.params, o.reason,
+       case when o.status = 'approved' and exists (select 1 from hub.operation_execution_claims ec where ec.operation_id = o.id)
+         then 'executing' else o.status end as status, o.result_code, o.created_at, o.decided_at, o.executed_at,
        o.requested_by, r.display_name as requested_by_name, d.display_name as decided_by_name, c.adapter_key
      from hub.operation_requests o
      join hub.platform_connections c on c.id = o.connection_id
@@ -231,7 +233,7 @@ export async function decideOperation(ctx, id, decision) {
   requirePermission(ctx.staff, 'operation.decide');
   if (!isUuid(id) || !['approved', 'rejected'].includes(decision)) throw notFound();
   return asStaff(ctx, async tx => {
-    const operation = one(await tx.query(`select id, client_account_id, status, requested_by from hub.operation_requests where id = $1`, [id]));
+    const operation = one(await tx.query(`select id, client_account_id, status, requested_by from hub.operation_requests where id = $1 for update`, [id]));
     if (!operation) throw notFound();
     if (operation.status !== 'requested') throw conflict('This request has already been decided.');
     if (decision === 'approved' && operation.requested_by === ctx.staff.id) throw forbidden('A second person must approve your request.');
@@ -245,11 +247,18 @@ export async function executeOperation(ctx, id) {
   requirePermission(ctx.staff, 'operation.execute');
   if (!ctx.operationsEnabled) throw unavailable('Live maintenance operations are turned off for this environment.');
   if (!isUuid(id)) throw notFound();
+  const claimToken = randomUUID();
   const { operation, connection } = await asStaff(ctx, async tx => {
-    const op = one(await tx.query(`select * from hub.operation_requests where id = $1`, [id]));
+    const op = one(await tx.query(`select * from hub.operation_requests where id = $1 for update`, [id]));
     if (!op) throw notFound();
     if (op.status !== 'approved') throw conflict('Only an approved request can be run.');
-    return { operation: op, connection: await visibleConnection(tx, op.connection_id) };
+    const connection = await visibleConnection(tx, op.connection_id);
+    const claimed = one(await tx.query(
+      `insert into hub.operation_execution_claims (operation_id, claim_token, claimed_by) values ($1, $2, $3)
+       on conflict (operation_id) do nothing returning operation_id`, [id, claimToken, ctx.staff.id]));
+    if (!claimed) throw conflict('This operation has already been claimed. Do not retry an uncertain outcome.');
+    await auditStaff(tx, ctx, 'operation.claim', { entityType: 'operation_request', entityId: id, clientId: op.client_account_id });
+    return { operation: op, connection };
   });
   const adapter = getAdapter(connection.adapter_key);
   const definition = adapter.operations.find(item => item.key === operation.operation_key);
@@ -263,9 +272,12 @@ export async function executeOperation(ctx, id) {
     code = safeCode(error);
   }
   await ctx.db.as('hub_worker', null, async tx => {
-    await tx.query(
-      `update hub.operation_requests set status = $2, executed_at = now(), result_code = $3 where id = $1`,
-      [id, code ? 'failed' : 'executed', code]);
+    const finalized = await tx.query(
+      `update hub.operation_requests set status = $2, executed_at = now(), result_code = $3 where id = $1
+         and status = 'approved' and exists (select 1 from hub.operation_execution_claims ec where ec.operation_id = $1 and ec.claim_token = $4)
+         returning id`,
+      [id, code ? 'failed' : 'executed', code, claimToken]);
+    if (!finalized.rows.length) throw conflict('The execution claim could not be finalized. Reconcile before taking further action.');
     await tx.query(
       `insert into hub.service_history (client_account_id, website_id, kind, summary, source, performed_by)
        values ($1, $2, 'maintenance', $3, 'system', $4)`,

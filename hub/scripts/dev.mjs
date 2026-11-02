@@ -28,8 +28,7 @@ const DEV_STAFF = [
 
 const pglite = new PGlite(process.env.HUB_DEV_DB || undefined);
 await pglite.waitReady;
-const migrated = (await pglite.query(`select to_regclass('hub.staff_users') as t`)).rows[0].t;
-if (!migrated) await applyMigrations(pglite);
+await applyMigrations(pglite);
 for (const member of DEV_STAFF) {
   await pglite.query(`insert into hub.staff_users (email, display_name, role) values ($1, $2, $3) on conflict (email) do nothing`,
     [member.email, member.display_name, member.role]);
