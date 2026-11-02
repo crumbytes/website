@@ -35,7 +35,7 @@
   "reviewed_application_trees": {
     "hub/src": "91b03a2cd1881215b526a242dda2da4367b1a039",
     "hub/api": "b127b9ad2a17a9795912a67509158ee7a000abd6",
-    "hub/db": "4d94ea7417e0129df4078606e78cd591545a5606"
+    "hub/db": "bd9f191d8ebceec21b05e6c384fa862619cf218c"
   },
   "development_start": "7ba168ce57e9bf755741b05c93e5c0271d471db0",
   "migration_files": 5,

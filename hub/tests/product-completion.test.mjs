@@ -74,6 +74,7 @@ test('scheduled maintenance queue persists one occurrence per tenant and never d
   const first=await enqueueDueMaintenance({db:h.db});assert.equal(first.created,1);
   assert.equal((await enqueueDueMaintenance({db:h.db})).created,0);
   const t=(await h.pg.query('select * from hub.maintenance_tasks')).rows[0];assert.equal(t.client_account_id,alpha);assert.equal(t.requires_approval,true);assert.equal(t.approved_at,null);
+  await assert.rejects(h.pg.query("insert into hub.task_rollbacks(task_id,client_account_id,plan,status,recorded_by) values($1,$2,'Synthetic rollback plan','completed',$3)",[t.id,alpha,owner]),/check constraint/);
   await h.pg.query("update hub.maintenance_tasks set status='cancelled' where id=$1",[t.id]);
   assert.equal((await enqueueDueMaintenance({db:h.db})).created,0,'cancelled occurrence stays cancelled, even after a restart');
  }finally{await h.close();}

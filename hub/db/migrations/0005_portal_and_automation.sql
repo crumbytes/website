@@ -28,7 +28,7 @@ create table hub.task_rollbacks (
  client_account_id uuid not null references hub.client_accounts(id), plan text not null check(length(plan) between 10 and 4000),
  status text not null check(status in ('planned','completed','failed')), evidence_ref text,
  recorded_by uuid not null references hub.staff_users(id), recorded_at timestamptz not null default now(),
- check(status='planned' or length(evidence_ref)>=3)
+ check(status='planned' or (evidence_ref is not null and length(evidence_ref)>=3))
 );
 do $$ declare t text; begin
  foreach t in array array['client_contacts','support_requests','task_rollbacks'] loop
