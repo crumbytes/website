@@ -43,3 +43,30 @@ test('deployment request validation refuses production, moving commits and unrel
  assert.equal(validateDeploymentRequest(request,{projectId,sha}).hosted_verified,false);
  for(const change of [{target:'production'},{target:'staging'},{withLatestCommit:true},{project:'prj_unrelated'},{gitSource:{...request.gitSource,sha:'b'.repeat(40)}},{gitSource:{...request.gitSource,repoId:1}},{gitSource:{...request.gitSource,ref:'main'}}]) assert.throws(()=>validateDeploymentRequest({...request,...change},{projectId,sha}));
 });
+
+const newRef='abcdefghijklmnopqrst'; // Synthetic configuration fixture, not a resource.
+const pooler='aws-0-test.pooler.supabase.com';
+const supabase={...env,HUB_STAGING_SUPABASE_PROJECT_REF:newRef,HUB_STAGING_DATABASE_HOST:pooler,HUB_STAGING_DATABASE_NAME:'postgres',DATABASE_URL:`postgres://hub_runtime.${newRef}:synthetic-only@${pooler}:6543/postgres?sslmode=verify-full`};
+
+test('Supabase shared-pooler login requires independent project pin while SQL role remains hub_runtime',()=>{
+ assert.equal(validateStagingEnvironment(supabase).hosted_verified,false);
+ for(const change of [{HUB_STAGING_SUPABASE_PROJECT_REF:''},{HUB_STAGING_SUPABASE_PROJECT_REF:'z'.repeat(20)},{DATABASE_URL:`postgres://postgres.${newRef}:synthetic-only@${pooler}:6543/postgres?sslmode=verify-full`},{DATABASE_URL:`postgres://hub_runtime.${newRef}:synthetic-only@${pooler}/postgres?sslmode=verify-full`}])assert.throws(()=>validateStagingEnvironment({...supabase,...change}));
+});
+
+test('Supabase direct connection supports only the independently pinned new Hub project',()=>{
+ const host=`db.${newRef}.supabase.co`;
+ assert.equal(validateStagingEnvironment({...supabase,HUB_STAGING_DATABASE_HOST:host,DATABASE_URL:`postgres://hub_runtime:synthetic-only@${host}:5432/postgres?sslmode=verify-full`}).hosted_verified,false);
+ assert.throws(()=>validateStagingEnvironment({...supabase,HUB_STAGING_DATABASE_HOST:'db.'+'z'.repeat(20)+'.supabase.co',DATABASE_URL:'postgres://hub_runtime:synthetic-only@db.'+'z'.repeat(20)+'.supabase.co:5432/postgres?sslmode=verify-full'}));
+});
+
+test('both supplied StackLTR project references are refused for direct and pooler Hub connections',()=>{
+ for(const ref of ['oyvnmolqtzzfljvztfbe','tpkptbpzasrcozjorcko']){
+  assert.throws(()=>validateStagingEnvironment({...supabase,HUB_STAGING_SUPABASE_PROJECT_REF:ref,DATABASE_URL:`postgres://hub_runtime.${ref}:synthetic-only@${pooler}:6543/postgres?sslmode=verify-full`}));
+  const host=`db.${ref}.supabase.co`;
+  assert.throws(()=>validateStagingEnvironment({...supabase,HUB_STAGING_SUPABASE_PROJECT_REF:ref,HUB_STAGING_DATABASE_HOST:host,DATABASE_URL:`postgres://hub_runtime:synthetic-only@${host}:5432/postgres?sslmode=verify-full`}));
+ }
+});
+
+test('a Supabase project pin cannot be redirected to an unrelated provider or database',()=>{
+ for(const change of [{HUB_STAGING_DATABASE_HOST:'db.example.test',DATABASE_URL:'postgres://hub_runtime:synthetic-only@db.example.test/postgres?sslmode=verify-full'},{HUB_STAGING_DATABASE_NAME:'other',DATABASE_URL:`postgres://hub_runtime.${newRef}:synthetic-only@${pooler}:6543/other?sslmode=verify-full`}])assert.throws(()=>validateStagingEnvironment({...supabase,...change}));
+});

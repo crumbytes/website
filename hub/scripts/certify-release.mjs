@@ -24,7 +24,9 @@ const approvedRoot=JSON.parse(git('show',policy.source_baseline+':vercel.json'))
 const releaseRoot=await read('../../vercel.json');
 delete releaseRoot.git.deploymentEnabled['codex/hub-release-candidate'];
 assert.deepEqual(releaseRoot,approvedRoot,'Existing branch and marketing settings must remain unchanged');
-assert.equal(git('diff','--name-only',policy.source_baseline+'...HEAD','--','hub/src','hub/api','hub/db','hub/package.json','hub/package-lock.json'),'','Application, security, migrations and dependencies must match verified PR #5');
+const runtimeChanges=git('diff','--name-only',policy.source_baseline+'...HEAD','--','hub/src','hub/api','hub/db','hub/package.json','hub/package-lock.json').split('\n').filter(Boolean);
+assert.ok(runtimeChanges.every(name=>name==='hub/src/config.js'),'Only the reviewed Supabase staging configuration delta is permitted; other application/security/migration/dependency changes require review');
+assert.equal(git('rev-parse','HEAD:hub/src/config.js'),policy.reviewed_staging_config_blob,'Staging configuration must match the exact reviewed Git blob');
 assert.equal(await readFile(new URL('../../.vercelignore',import.meta.url),'utf8'),git('show',policy.source_baseline+':.vercelignore')+'\n','Marketing exclusion policy must remain unchanged');
 const branchPolicy = (await read('../../vercel.json')).git?.deploymentEnabled;
 assert.equal(branchPolicy?.['codex/hub-release-candidate'],false,'Release branch auto-deployment must be disabled');

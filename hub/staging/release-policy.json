@@ -11,12 +11,16 @@
   "git_auto_deployment": false,
   "production_authorized": false,
   "deployment_protection_required": true,
-  "hostnames": ["hub-preview.crumbyte.com"],
+  "hostnames": [
+    "hub-preview.crumbyte.com"
+  ],
   "callback": "https://hub-preview.crumbyte.com/auth/callback",
   "runtime_database_role": "hub_runtime",
   "database_major": 17,
   "database_tls": "verify-full",
   "external_integrations": "disabled",
   "scheduled_jobs": "disabled",
-  "hosted_ready": false
+  "hosted_ready": false,
+  "reviewed_staging_config_blob": "fc79428f659beb4f944b0459c539734ee4c6800e",
+  "configuration_delta": "Supabase composite pooler login with independent new-project pin and explicit StackLTR exclusions"
 }
