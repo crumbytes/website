@@ -1,0 +1,12 @@
+{
+  "rootDirectory": "hub",
+  "framework": null,
+  "nodeVersion": "24.x",
+  "installCommand": "npm ci",
+  "buildCommand": null,
+  "outputDirectory": null,
+  "sourceFilesOutsideRootDirectory": false,
+  "directoryListing": false,
+  "autoAssignCustomDomains": false,
+  "ssoProtection": { "deploymentType": "all" }
+}

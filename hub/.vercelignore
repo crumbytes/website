@@ -1,0 +1,13 @@
+# Provider deployment input only. Operator tools and local secrets stay local.
+.env
+.env.*
+.vercel/
+.data/
+docs/
+e2e/
+hosted/
+tests/
+scripts/
+staging/
+test-results/
+playwright-report/

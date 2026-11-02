@@ -1,0 +1,22 @@
+{
+  "description": "Desired staging policy, not an applied provider API payload or observed infrastructure state",
+  "source_baseline": "cf90c7a5f811f5f9acce1f8af8fba59da56cbd5b",
+  "marketing_baseline": "a2ecbdbf4c75caa21cfbffe51b020e4742426601",
+  "project_name": "crumbyte-hub-staging",
+  "repository": "crumbytes/website",
+  "root_directory": "hub",
+  "node_major": 24,
+  "framework": "Other",
+  "target": "preview",
+  "git_auto_deployment": false,
+  "production_authorized": false,
+  "deployment_protection_required": true,
+  "hostnames": ["hub-preview.crumbyte.com"],
+  "callback": "https://hub-preview.crumbyte.com/auth/callback",
+  "runtime_database_role": "hub_runtime",
+  "database_major": 17,
+  "database_tls": "verify-full",
+  "external_integrations": "disabled",
+  "scheduled_jobs": "disabled",
+  "hosted_ready": false
+}

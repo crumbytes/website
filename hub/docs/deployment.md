@@ -1,5 +1,7 @@
 # Deployment and environments
 
+Current release preparation: [Sprint 4 approval package](sprint4-approval.md). No provider resources were applied.
+
 Current frontend/integration candidate: [Sprint 3 release report](sprint3-release.md).
 
 For the current staging sprint, use the [Sprint 2 approval packet](sprint2-approval.md) and [hosted acceptance procedure](hosted-acceptance.md). It supersedes historical observations and specifies `hub-preview.crumbyte.com`; the account settings below were not reverified. Hosted config now requires `HUB_OIDC_REQUIRED_AMR`.

@@ -40,6 +40,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -50,6 +53,8 @@ jobs:
         run: |
           python3 scripts/check-seo.py
           node --test tests/contact.test.mjs
+      - name: Certify release inputs
+        run: node scripts/certify-release.mjs
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
@@ -63,5 +68,9 @@ jobs:
           node scripts/pg-frontend.mjs
         env:
           HUB_PG_OWNER_URL: postgres://hub_owner:ci-owner@localhost:5432/hub
+      - name: Verify official serverless build
+        run: |
+          npm install --prefix "$RUNNER_TEMP/hub-builder" --no-audit --no-fund @vercel/node@29.0.1 @vercel/build-utils@15.2.1
+          HUB_BUILDER_TOOLS_DIR="$RUNNER_TEMP/hub-builder" node scripts/verify-serverless-build.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
