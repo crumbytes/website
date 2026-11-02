@@ -8,7 +8,7 @@ Review date: 2026-11-01 (Pacific/Honolulu). Draft PR: https://github.com/crumbyt
 
 The sprint starts at `8cd4ea66f6fd852d47558ee52387db476f3605f8`. PR #3 remains `a4bf7a1f7340e7f9c2fdaafc6f70b8d6da668c6e`. GitHub confirmed PR #3's Website Hub check succeeded on that commit (run `41304789288`). The opening PR #4 check succeeded on the pre-Sprint-2 head (run `41378057933`); that result must not be confused with checks on the new head.
 
-The exact final candidate is the full SHA shown in PR #4 and the delivery report. Obtain it with `git rev-parse HEAD`; approval must record the full SHA, not a branch name. Later documentation revisions must not silently change the deployed candidate.
+The security implementation commit is `f5c882d5145b74874fc550ee6b508da2618a3d19`; its exact-commit CI run [41379305514](https://github.com/crumbytes/website/actions/runs/41379305514) passed. The exact final candidate, including documentation updates, is the full SHA shown in PR #4 and the delivery report. Obtain it with `git rev-parse HEAD`; approval must record the full SHA, not a branch name. Later documentation revisions must not silently change the deployed candidate.
 
 Local validation:
 
@@ -104,6 +104,6 @@ Use [hosted acceptance instructions](hosted-acceptance.md). Default hosted tests
 
 Remaining external blockers: read-only Vercel/Cloudflare account access; approved provider plans/monthly cap; isolated database/role setup approval; staging IdP/admin/MFA setup; secure values; hosted migration approval; protected Preview deployment approval; exact DNS target/verification details; DNS change approval; hosted acceptance at the approved SHA. The code and configuration templates do not substitute for these steps.
 
-No paid infrastructure was created: incremental externally billed cost in this sprint is zero. Expected hosted costs depend on the commercial Vercel plan and protection/custom Preview domain coverage, Auth0 MFA/active staff entitlement, and PostgreSQL compute/storage/pooling/backups. Cloudflare DNS may be covered by the existing zone plan. Obtain current quotes and a spending cap before provisioning; no paid plan or cost estimate is silently approved.
+No paid infrastructure or new vendor subscription was created. Existing cloud execution and CI usage remain subject to the current plans; their charges were not inspected. Expected hosted costs depend on the commercial Vercel plan and protection/custom Preview domain coverage, Auth0 MFA/active staff entitlement, and PostgreSQL compute/storage/pooling/backups. Cloudflare DNS may be covered by the existing zone plan. Obtain current quotes and a spending cap before provisioning; no paid plan or cost estimate is silently approved.
 
 Next actions, in order: review draft PR/checks and exact SHA; obtain account visibility; approve provider configuration and budget; prepare identity/DB and approve migrations; approve Preview deployment; verify access protection on Vercel URLs; approve exact DNS changes; validate TLS and run hosted acceptance with synthetic data. Main, production hosting and all live CMS operations remain untouched.
