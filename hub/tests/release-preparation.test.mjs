@@ -70,3 +70,27 @@ test('both supplied StackLTR project references are refused for direct and poole
 test('a Supabase project pin cannot be redirected to an unrelated provider or database',()=>{
  for(const change of [{HUB_STAGING_DATABASE_HOST:'db.example.test',DATABASE_URL:'postgres://hub_runtime:synthetic-only@db.example.test/postgres?sslmode=verify-full'},{HUB_STAGING_DATABASE_NAME:'other',DATABASE_URL:`postgres://hub_runtime.${newRef}:synthetic-only@${pooler}:6543/other?sslmode=verify-full`}])assert.throws(()=>validateStagingEnvironment({...supabase,...change}));
 });
+
+// Reserved test hostname only; no managed Neon endpoint is contacted.
+const neonHost='ep-synthetic-pooler.neon.example.test';
+const neon={...env,HUB_STAGING_DATABASE_HOST:neonHost,HUB_STAGING_DATABASE_NAME:'hub_staging',
+ DATABASE_URL:`postgres://hub_runtime:synthetic-only@${neonHost}:5432/hub_staging?sslmode=verify-full`};
+
+test('Neon-style pooled and direct runtime profiles use the dedicated SQL role without a Supabase pin',()=>{
+ for(const host of [neonHost,neonHost.replace('-pooler','')]){
+  const result=validateStagingEnvironment({...neon,HUB_STAGING_DATABASE_HOST:host,
+   DATABASE_URL:`postgres://hub_runtime:synthetic-only@${host}:5432/hub_staging?sslmode=verify-full`});
+  assert.equal(result.status,'configuration-consistent');assert.equal(result.hosted_verified,false);
+ }
+});
+
+test('Neon runtime profile rejects owner credentials, endpoint/database drift and inherited Supabase pins',()=>{
+ for(const change of [
+  {DATABASE_URL:neon.DATABASE_URL.replace('hub_runtime:','neondb_owner:')},
+  {HUB_STAGING_DATABASE_HOST:'ep-other.neon.example.test'},
+  {HUB_STAGING_DATABASE_NAME:'neondb'},
+  {HUB_STAGING_SUPABASE_PROJECT_REF:newRef},
+  {DATABASE_URL:neon.DATABASE_URL.replace('verify-full','require')},
+  {HUB_PG_OWNER_URL:'postgres://operator@owner.example.test/hub_staging'}
+ ])assert.throws(()=>validateStagingEnvironment({...neon,...change}));
+});

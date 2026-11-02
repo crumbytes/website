@@ -1,5 +1,7 @@
 # Sprint 5 — protected staging activation decision
 
+Provider/cost decision superseded by [the Neon/free-tier staging decision](free-tier-staging.md). Historical observations below remain evidence for their stated review date.
+
 Reviewed 2026-11-02 UTC. **Ready for infrastructure review; not hosted-ready.** Continue in draft PR #6, `codex/hub-release-candidate`. Nothing was merged, deployed, provisioned or changed in hosted databases or DNS. The public website is unchanged. This document supersedes Sprint 4's provider selection/cost assumptions; its detailed security and operator procedures still apply.
 
 ## Candidate and verification

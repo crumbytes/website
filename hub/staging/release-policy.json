@@ -22,5 +22,11 @@
   "scheduled_jobs": "disabled",
   "hosted_ready": false,
   "reviewed_staging_config_blob": "fc79428f659beb4f944b0459c539734ee4c6800e",
-  "configuration_delta": "Supabase composite pooler login with independent new-project pin and explicit StackLTR exclusions"
+  "configuration_delta": "Supabase composite pooler login with independent new-project pin and explicit StackLTR exclusions",
+  "database_provider": "Neon",
+  "database_project_name": "crumbyte-hub-staging",
+  "database_plan_preference": "Free only after account-level zero-recurring-cost eligibility verification",
+  "protected_neon_project": "frosty-union-75655676",
+  "database_provider_account_verified": false,
+  "free_tier_security_compatible": false
 }
