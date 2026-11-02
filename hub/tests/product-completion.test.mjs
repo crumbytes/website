@@ -38,6 +38,7 @@ test('customer portal enforces MFA and isolates Alpha from Bravo, staff routes a
   await portal.updateRequest(ctx,r[0].id,{status:'resolved',resolution:'The service team completed the synthetic request.'});
   assert.match(await (await customer.get('/portal')).text(),/service team completed/);
   h.idp.overrideClaims={amr:['pwd']};assert.equal((await h.login('alpha@product.test')).res.status,403);
+  h.idp.overrideClaims={amr:['pwd','mfa'],email_verified:false};assert.equal((await h.login('alpha@product.test')).res.status,403,'an already-bound subject still needs verified email');
  }finally{await h.close();}
 });
 
