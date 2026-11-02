@@ -41,10 +41,12 @@ try{
  const env={...process.env,HUB_LOCAL_DATABASE_URL:sourceUrl,HUB_LOCAL_RECOVERY_CONFIRM:new URL(sourceUrl).pathname.slice(1),HUB_LOCAL_SNAPSHOT_DIR:dir,HUB_LOCAL_BACKUP_KEY:randomBytes(32).toString('base64')};
  const result=await exec(process.execPath,['scripts/local-backup.mjs','backup'],{env});const snapshot=JSON.parse(result.stdout);
  const restored=await exec(process.execPath,['scripts/local-backup.mjs','restore',snapshot.id],{env:{...env,HUB_LOCAL_DATABASE_URL:targetUrl.href,HUB_LOCAL_RECOVERY_CONFIRM:'hub_restore'}});assert.equal(JSON.parse(restored.stdout).restored,true);
- for(const table of ['managed_websites','staff_users','client_accounts','support_requests','operation_execution_claims','staff_sessions','audit_log']){
+ for(const table of ['managed_websites','staff_users','client_accounts','support_requests','operation_execution_claims','staff_sessions','portal_history_shares','client_contacts','task_rollbacks']){
   const sql=`select count(*)::int n from hub.${table}`;
   assert.equal((await source.query(sql)).rows[0].n,(await target.query(sql)).rows[0].n,table);
  }
+ assert.equal((await target.query('select count(*)::int n from hub.audit_log')).rows[0].n,(await source.query('select count(*)::int n from hub.audit_log')).rows[0].n+1);
+ assert.equal((await target.query('select action from hub.audit_log order by seq desc limit 1')).rows[0].action,'database.local_restore');
  assert.equal((await target.query('select hub.verify_audit_chain() broken')).rows[0].broken,null);
  const runtimeUrl=new URL(targetUrl);runtimeUrl.username='hub_runtime';runtimeUrl.password='disposable-ci-password';
  const db=createDb(pgDriver(runtimeUrl.href,pg.Pool));

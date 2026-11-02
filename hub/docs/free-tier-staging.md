@@ -1,5 +1,8 @@
 # Neon/free-tier staging decision and release evidence
 
+**Historical provider/release snapshot:** current application completion, five-migration schema, source-tree certification and test evidence supersede the earlier immutable-runtime/test-count statements below. See [product-handbook.md](product-handbook.md) and the current PR #6 evidence. Provider access and actual hosted tests remain deferred.
+
+
 Reviewed 2026-11-02 UTC. This is the current provider decision, superseding the Supabase preference and estimates in `sprint5-activation.md`. **BLOCKED: staging is not operational.** No infrastructure, authentication tenant, hosted migration, deployment, DNS record or production setting was created/changed. Existing StackLTR projects remain untouched. Main must remain untouched; continue in draft PR #6.
 
 ## Architecture and release inventory — VERIFIED
